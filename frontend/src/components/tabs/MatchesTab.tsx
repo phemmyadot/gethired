@@ -1,7 +1,24 @@
 import { useState } from "react";
 import { type Match, type Resume } from "../../lib/api";
-import { ScoreBadge, StatusPill, WorkModeTag } from "../ui";
+import { JobCard, type JobCardData } from "../JobCard";
 import { MatchDrawer } from "../MatchDrawer";
+
+function toCardData(m: Match): JobCardData {
+  return {
+    title: m.job_title,
+    company: m.company,
+    source: m.source,
+    location: m.location,
+    workMode: m.work_mode,
+    applyUrl: m.apply_url,
+    postedAt: m.posted_at ?? m.reviewed_at,
+    score: m.score,
+    resumeLabel: m.resume_label,
+    applied: m.applied,
+    applyStatus: m.apply_status,
+    applicationId: m.application_id,
+  };
+}
 
 export function MatchesTab({ matches, resumes, onRefresh, onViewApplication }: {
   matches: Match[]; resumes: Resume[]; onRefresh: () => void; onViewApplication: (applicationId: string) => void;
@@ -66,55 +83,14 @@ export function MatchesTab({ matches, resumes, onRefresh, onViewApplication }: {
           No matches yet. Run the pipeline to get started.
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-5">
           {filtered.map((m, i) => (
-            <div
+            <JobCard
               key={i}
+              job={toCardData(m)}
               onClick={() => setSelected(m)}
-              className="bg-surface rounded-xl2 border border-border/60 shadow-card hover:shadow-card-hover transition-shadow p-5 flex flex-col gap-4 cursor-pointer"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="font-display text-lg font-semibold text-ink leading-snug truncate">{m.job_title}</div>
-                  <div className="text-sm text-muted mt-0.5">
-                    {m.company}{m.location ? ` · ${m.location}` : ""}
-                  </div>
-                </div>
-                <ScoreBadge score={m.score} />
-              </div>
-
-              <div className="flex items-center gap-2 flex-wrap">
-                <WorkModeTag mode={m.work_mode} />
-                <span className="text-xs bg-panel text-ink/70 px-2.5 py-1 rounded-full">{m.resume_label}</span>
-                <span className="text-xs text-muted">
-                  {new Date(m.posted_at ?? m.reviewed_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-                </span>
-              </div>
-
-              <div className="flex items-center justify-between gap-2 mt-auto pt-3 border-t border-border/60">
-                {m.applied && m.application_id ? (
-                  <button
-                    onClick={e => { e.stopPropagation(); onViewApplication(m.application_id!); }}
-                    className="hover:opacity-80 transition-opacity"
-                  >
-                    <StatusPill status={m.apply_status ?? "applied"} />
-                  </button>
-                ) : (
-                  <span className="text-sm text-muted">Not applied</span>
-                )}
-                {m.apply_url && (
-                  <a
-                    href={m.apply_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-sm font-semibold px-4 py-2 rounded-full bg-accent-soft text-accent hover:bg-accent hover:text-white transition-colors"
-                    onClick={e => e.stopPropagation()}
-                  >
-                    View listing
-                  </a>
-                )}
-              </div>
-            </div>
+              onViewApplication={onViewApplication}
+            />
           ))}
         </div>
       )}

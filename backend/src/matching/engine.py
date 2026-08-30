@@ -53,6 +53,11 @@ Evaluate how well this candidate's resume matches the job description.
 Be strict and honest. A score of 0.70 means genuinely qualified — not just keyword overlap.
 Consider: required skills match, years of experience, domain fit, seniority alignment.
 
+Do not default to round or "typical-sounding" scores like 0.82, 0.75, or 0.68 out of habit.
+Compute the score fresh for THIS specific resume/job pair — it should vary meaningfully between
+different jobs, including values like 0.41, 0.57, 0.76, 0.93, etc. Two different jobs matched
+against the same resume should almost never score identically unless the fit is truly equivalent.
+
 RESUME LABEL: {label}
 RESUME:
 {resume_content}
@@ -61,17 +66,20 @@ JOB TITLE: {title} at {company}
 JOB DESCRIPTION:
 {description}
 
+First, in your own reasoning, identify: (1) which required skills/years/domain the resume clearly
+covers, (2) which it clearly lacks, (3) how strong the seniority match is. Only after that, derive
+a score consistent with those specific findings — not a general impression.
+
 Respond ONLY with valid JSON — no markdown, no preamble:
 {{
-  "score": 0.82,
-  "reasoning": "One paragraph explaining the match quality.",
+  "reasoning": "One paragraph explaining the match quality, citing specific resume/job details.",
   "missing_skills": ["skill1", "skill2"],
   "selling_points": ["point1", "point2"],
   "seniority_fit": "good|over|under",
-  "recommended_resume": true
+  "recommended_resume": true,
+  "score": <float between 0.0 and 1.0, derived from the reasoning above, not a round default>
 }}
 
-score: 0.0 to 1.0
 missing_skills: skills in job description not evident in resume (max 5)
 selling_points: strongest resume points for this role (max 4)
 seniority_fit: is this role a good level match?
