@@ -3,6 +3,9 @@ SQLAlchemy models for JobBot.
 All tables with dedup guards and full audit trail.
 """
 from datetime import datetime
+from pathlib import Path
+
+from dotenv import load_dotenv
 from sqlalchemy import (
     create_engine, Column, String, Float, Text, DateTime,
     Boolean, ForeignKey, ARRAY, UniqueConstraint, Index
@@ -12,6 +15,10 @@ from sqlalchemy.orm import declarative_base, relationship, Session
 from sqlalchemy.sql import func
 import uuid
 import os
+
+backend_dir = Path(__file__).resolve().parents[2]
+for env_file in (backend_dir / ".env.local", backend_dir / ".env"):
+    load_dotenv(env_file, override=False)
 
 Base = declarative_base()
 
