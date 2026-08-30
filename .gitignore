@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+.venv/
+.venv*/
+venv/
+venv*/
+ENV/
+.env
+.env.*
+!.env.example
+!.env.template
+!.env.sample
+
+# Python tooling
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Project runtime data
+*.log
+*.sqlite3
+*.db
+resume_files/
+/tmp/
+
+# Node / frontend
+node_modules/
+.next/
+out/
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Docker / local volumes
+pgdata/
+
+# Build artifacts
+build/
+dist/
+*.tar.gz

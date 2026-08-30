@@ -1,0 +1,65 @@
+const BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+async function req<T>(path: string, opts?: RequestInit): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    headers: { "Content-Type": "application/json" },
+    ...opts,
+  });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return res.json();
+}
+
+// ── Resumes ────────────────────────────────────────────────
+export type Resume = {
+  id: string; label: string; filename: string; created_at: string;
+};
+export const getResumes = () => req<Resume[]>("/resumes");
+export const deleteResume = (id: string) =>
+  req(`/resumes/${id}`, { method: "DELETE" });
+export async function uploadResume(file: File, label: string): Promise<Resume> {
+  const fd = new FormData();
+  fd.append("file", file);
+  fd.append("label", label);
+  const res = await fetch(`${BASE}/resumes`, { method: "POST", body: fd });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+// ── Jobs ───────────────────────────────────────────────────
+export type Job = {
+  id: string; title: string; company: string; source: string;
+  location: string; remote: boolean; apply_url: string; fetched_at: string;
+};
+export const getJobs = (source?: string) =>
+  req<Job[]>(`/jobs${source ? `?source=${source}` : ""}`);
+
+// ── Matches ────────────────────────────────────────────────
+export type Match = {
+  job_id: string; resume_id: string; resume_label: string;
+  job_title: string; company: string; score: number;
+  reasoning: string; missing_skills: string[]; selling_points: string[];
+  applied: boolean; apply_status: string | null; reviewed_at: string;
+};
+export const getMatches = (minScore = 0) =>
+  req<Match[]>(`/matches?min_score=${minScore}`);
+
+// ── Applications ───────────────────────────────────────────
+export type Application = {
+  id: string; job_title: string; company: string; resume_label: string;
+  match_score: number; status: string; applied_at: string; cover_letter: string;
+};
+export const getApplications = () => req<Application[]>("/applications");
+export const updateAppStatus = (id: string, status: string, notes?: string) =>
+  req(`/applications/${id}/status?status=${status}${notes ? `&notes=${notes}` : ""}`,
+    { method: "PATCH" });
+
+// ── Stats ──────────────────────────────────────────────────
+export type Stats = {
+  total_jobs: number; total_resumes: number; total_matches: number;
+  total_applied: number; interviews: number; offers: number;
+};
+export const getStats = () => req<Stats>("/stats");
+
+// ── Pipeline ───────────────────────────────────────────────
+export const triggerPipeline = () =>
+  req("/pipeline/run", { method: "POST" });

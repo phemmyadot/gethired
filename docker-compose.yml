@@ -1,0 +1,55 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: jobbot
+      POSTGRES_PASSWORD: jobbot
+      POSTGRES_DB: jobbot
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U jobbot"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    env_file: ./backend/.env
+    depends_on:
+      db:
+        condition: service_healthy
+    command: uvicorn src.api.routes:app --host 0.0.0.0 --port 8000 --reload
+    volumes:
+      - ./backend:/app
+      - resume_files:/tmp/jobbot_resumes
+
+  scheduler:
+    build: ./backend
+    env_file: ./backend/.env
+    depends_on:
+      db:
+        condition: service_healthy
+    command: python -m src.scheduler
+    volumes:
+      - ./backend:/app
+      - resume_files:/tmp/jobbot_resumes
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+    depends_on:
+      - api
+
+volumes:
+  pgdata:
+  resume_files:
