@@ -1,4 +1,5 @@
 "use client";
+import Head from "next/head";
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
   getStats, getMatches, getApplications, getResumes, getJobs, triggerPipeline, getPipelineStatus,
@@ -91,6 +92,9 @@ export default function Home() {
 
   return (
     <div className="flex h-screen overflow-hidden bg-ink">
+      <Head>
+        <title>JobBot — AI application engine</title>
+      </Head>
       <Sidebar
         tab={tab}
         onTabChange={setTab}

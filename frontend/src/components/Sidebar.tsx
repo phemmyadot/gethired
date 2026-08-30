@@ -29,7 +29,7 @@ export function Sidebar({ tab, onTabChange, navItems, pipelineRunning, onRunPipe
       {/* Logo */}
       <div className="px-4 py-5 border-b border-border">
         <div className="flex items-center gap-2">
-          <span className="text-teal font-mono font-bold text-lg">JB</span>
+          <img src="/icon.svg" alt="" width={22} height={22} className="rounded" />
           <span className="text-text font-semibold text-sm">JobBot</span>
         </div>
         <div className="text-xs text-muted mt-0.5">AI application engine</div>
