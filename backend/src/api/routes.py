@@ -13,6 +13,7 @@ from ..db.models import get_session, Base, get_engine, Resume, Job, JobMatch, Ap
 from ..matching.resume_parser import extract_resume_text, clean_text
 from ..ingestion.pipeline import run_ingestion
 from ..matching.engine import process_jobs_for_matching
+from ..matching.profile import extract_profile
 from ..applying.applicator import run_applications
 
 app = FastAPI(title="JobBot API", version="1.0.0")
@@ -26,6 +27,7 @@ app.add_middleware(
 )
 
 UPLOAD_DIR = os.getenv("RESUME_UPLOAD_DIR", "/tmp/jobbot_resumes")
+AUTO_APPLY_ENABLED = os.getenv("AUTO_APPLY_ENABLED", "false").lower() == "true"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 USER_ID = "00000000-0000-0000-0000-000000000001"  # single-user for MVP
@@ -155,6 +157,25 @@ def list_matches(
     return results
 
 
+@app.post("/matches/{job_id}/{resume_id}/apply")
+def apply_to_match(job_id: UUID, resume_id: UUID, db: Session = Depends(get_db)):
+    """Manually apply to a single matched job."""
+    match = db.query(JobMatch).filter_by(job_id=job_id, resume_id=resume_id).first()
+    if not match:
+        raise HTTPException(404, "Match not found")
+    if db.query(AppliedJob).filter_by(job_id=job_id).first():
+        raise HTTPException(409, "Already applied to this job")
+
+    candidate = {
+        "job": match.job,
+        "best_resume": match.resume,
+        "best_score": match.score,
+        "selling_points": match.selling_points or [],
+    }
+    run_applications([candidate], db)
+    return {"message": "Application submitted"}
+
+
 # ─────────────────────────────────────────────
 # Applications endpoints
 # ─────────────────────────────────────────────
@@ -215,12 +236,19 @@ def _run_full_pipeline():
         if not resumes:
             return
 
-        new_jobs = run_ingestion(db)
+        latest_resume = max(resumes, key=lambda r: r.created_at)
+        profile = extract_profile(latest_resume.content)
+        prefs = {
+            "keywords": profile["search_keywords"],
+            "required_keywords": profile["required_keywords"],
+        }
+
+        new_jobs = run_ingestion(db, prefs=prefs)
         if not new_jobs:
             return
 
         candidates = process_jobs_for_matching(new_jobs, resumes, db)
-        if candidates:
+        if candidates and AUTO_APPLY_ENABLED:
             run_applications(candidates, db)
     finally:
         db.close()

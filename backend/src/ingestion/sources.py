@@ -144,12 +144,19 @@ def fetch_remotive(category: str = "", search: str = "") -> list[dict]:
 # Source 3: Greenhouse ATS (per company)
 # ─────────────────────────────────────────────
 
-GREENHOUSE_COMPANIES = [
-    # Add your target companies here — these are their Greenhouse board tokens
+_DEFAULT_GREENHOUSE_COMPANIES = [
     "airbnb", "stripe", "figma", "notion", "linear",
     "vercel", "anthropic", "openai", "databricks", "cloudflare",
     "discord", "dropbox", "twilio", "hashicorp", "mongodb",
 ]
+
+def _companies_from_env(var: str, default: list[str]) -> list[str]:
+    raw = os.getenv(var)
+    if not raw:
+        return default
+    return [c.strip() for c in raw.split(",") if c.strip()]
+
+GREENHOUSE_COMPANIES = _companies_from_env("GREENHOUSE_COMPANY_TOKENS", _DEFAULT_GREENHOUSE_COMPANIES)
 
 def fetch_greenhouse_company(board_token: str) -> list[dict]:
     """Fetch all open jobs for one company on Greenhouse."""
@@ -201,10 +208,12 @@ def fetch_greenhouse_all(companies: list[str] = None) -> list[dict]:
 # Source 4: Lever ATS (per company)
 # ─────────────────────────────────────────────
 
-LEVER_COMPANIES = [
+_DEFAULT_LEVER_COMPANIES = [
     "netflix", "reddit", "canva", "plaid", "rippling",
     "brex", "gusto", "lattice", "carta", "ironclad",
 ]
+
+LEVER_COMPANIES = _companies_from_env("LEVER_COMPANY_TOKENS", _DEFAULT_LEVER_COMPANIES)
 
 def fetch_lever_company(company: str) -> list[dict]:
     """Fetch all open jobs for one company on Lever."""

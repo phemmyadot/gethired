@@ -1,8 +1,8 @@
 "use client";
-import { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   getStats, getMatches, getApplications, getResumes, getJobs,
-  uploadResume, deleteResume, triggerPipeline, updateAppStatus,
+  uploadResume, deleteResume, triggerPipeline, updateAppStatus, applyToMatch,
   type Stats, type Match, type Application, type Resume, type Job,
 } from "../lib/api";
 
@@ -86,7 +86,23 @@ function NavItem({ icon, label, active, onClick, badge }: {
 }
 
 // ── Detail drawer ──────────────────────────────────────────
-function MatchDrawer({ match, onClose }: { match: Match; onClose: () => void }) {
+function MatchDrawer({ match, onClose, onApplied }: { match: Match; onClose: () => void; onApplied: () => void }) {
+  const [applying, setApplying] = useState(false);
+  const [error, setError] = useState("");
+
+  async function handleApply() {
+    setApplying(true);
+    setError("");
+    try {
+      await applyToMatch(match.job_id, match.resume_id);
+      onApplied();
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setApplying(false);
+    }
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
       <div className="absolute inset-0 bg-ink/70" onClick={onClose} />
@@ -106,12 +122,23 @@ function MatchDrawer({ match, onClose }: { match: Match; onClose: () => void }) 
           {/* Resume used */}
           <section>
             <div className="text-xs text-muted mb-2">Resume matched</div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <span className="text-sm bg-teal/10 border border-teal/30 text-teal px-3 py-1 rounded">
                 {match.resume_label}
               </span>
-              {match.applied && <StatusPill status={match.apply_status ?? "applied"} />}
+              {match.applied ? (
+                <StatusPill status={match.apply_status ?? "applied"} />
+              ) : (
+                <button
+                  onClick={handleApply}
+                  disabled={applying}
+                  className="text-xs bg-teal text-ink font-semibold px-3 py-1.5 rounded hover:bg-teal/90 disabled:opacity-50 transition-colors"
+                >
+                  {applying ? "Applying…" : "Apply"}
+                </button>
+              )}
             </div>
+            {error && <div className="text-xs text-rose mt-2">{error}</div>}
           </section>
 
           {/* Claude reasoning */}
@@ -316,7 +343,7 @@ function DashboardTab({ stats }: { stats: Stats | null }) {
 }
 
 // ── Tab: Matches ───────────────────────────────────────────
-function MatchesTab({ matches }: { matches: Match[] }) {
+function MatchesTab({ matches, onRefresh }: { matches: Match[]; onRefresh: () => void }) {
   const [selected, setSelected] = useState<Match | null>(null);
   const [filter, setFilter] = useState<"all" | "pending" | "applied">("all");
 
@@ -382,7 +409,13 @@ function MatchesTab({ matches }: { matches: Match[] }) {
         </table>
       </div>
 
-      {selected && <MatchDrawer match={selected} onClose={() => setSelected(null)} />}
+      {selected && (
+        <MatchDrawer
+          match={selected}
+          onClose={() => setSelected(null)}
+          onApplied={() => { onRefresh(); setSelected(null); }}
+        />
+      )}
     </div>
   );
 }
@@ -633,44 +666,6 @@ export default function Home() {
 
   return (
     <>
-      <style jsx global>{`
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap');
-        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-        html, body { height: 100%; background: #0F1923; color: #D4E2F0; font-family: Inter, system-ui, sans-serif; }
-        ::-webkit-scrollbar { width: 4px; height: 4px; }
-        ::-webkit-scrollbar-track { background: #1C2B3A; }
-        ::-webkit-scrollbar-thumb { background: #2E4057; border-radius: 2px; }
-        .font-mono { font-family: 'JetBrains Mono', monospace; }
-        .text-teal  { color: #00C2A8; }
-        .text-amber { color: #F5A623; }
-        .text-rose  { color: #E8445A; }
-        .text-sky   { color: #4A9EE8; }
-        .text-muted { color: #8B9EB7; }
-        .text-text  { color: #D4E2F0; }
-        .bg-ink     { background: #0F1923; }
-        .bg-surface { background: #1C2B3A; }
-        .bg-panel   { background: #253447; }
-        .border-border { border-color: #2E4057; }
-        .bg-teal\/10 { background: rgba(0,194,168,.10); }
-        .bg-teal\/20 { background: rgba(0,194,168,.20); }
-        .bg-teal\/30 { background: rgba(0,194,168,.30); }
-        .bg-teal\/40 { background: rgba(0,194,168,.40); }
-        .bg-amber\/10 { background: rgba(245,166,35,.10); }
-        .bg-amber\/20 { background: rgba(245,166,35,.20); }
-        .bg-rose\/10  { background: rgba(232,68,90,.10); }
-        .bg-sky\/10   { background: rgba(74,158,232,.10); }
-        .bg-sky\/20   { background: rgba(74,158,232,.20); }
-        .border-teal\/30 { border-color: rgba(0,194,168,.30); }
-        .border-teal\/40 { border-color: rgba(0,194,168,.40); }
-        .border-teal\/50 { border-color: rgba(0,194,168,.50); }
-        .border-teal\/60 { border-color: rgba(0,194,168,.60); }
-        .border-amber\/30 { border-color: rgba(245,166,35,.30); }
-        .border-rose\/30  { border-color: rgba(232,68,90,.30); }
-        .border-sky\/30   { border-color: rgba(74,158,232,.30); }
-        .border-r-2 { border-right-width: 2px; }
-        .border-teal { border-color: #00C2A8; }
-      `}</style>
-
       <div className="flex h-screen overflow-hidden bg-ink">
 
         {/* Sidebar */}
@@ -727,7 +722,7 @@ export default function Home() {
           {/* Content */}
           <div className="flex-1 overflow-y-auto p-6">
             {tab === "dashboard"    && <DashboardTab stats={stats} />}
-            {tab === "matches"      && <MatchesTab matches={matches} />}
+            {tab === "matches"      && <MatchesTab matches={matches} onRefresh={load} />}
             {tab === "applications" && <ApplicationsTab apps={apps} onRefresh={load} />}
             {tab === "resumes"      && <ResumesTab resumes={resumes} onRefresh={load} />}
             {tab === "jobs"         && <JobsTab jobs={jobs} />}

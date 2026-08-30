@@ -3,6 +3,7 @@ Ingestion pipeline: fetch → pre-filter → dedup → save.
 Returns list of newly inserted Job records for matching.
 """
 import logging
+import os
 import time
 from datetime import datetime
 from sqlalchemy.exc import IntegrityError
@@ -27,6 +28,14 @@ DEFAULT_BLOCKED_TITLES = [
 ]
 
 DEFAULT_REQUIRED_KEYWORDS: list[str] = []  # e.g. ["python", "react"]
+
+def _default_sources() -> list[str]:
+    sources = ["adzuna", "remotive"]
+    if os.getenv("GREENHOUSE_ENABLED", "false").lower() == "true":
+        sources.append("greenhouse")
+    if os.getenv("LEVER_ENABLED", "false").lower() == "true":
+        sources.append("lever")
+    return sources
 
 def pre_filter(job: dict, prefs: dict = None) -> bool:
     """
@@ -104,7 +113,7 @@ def run_ingestion(db: Session, prefs: dict = None, sources: list[str] = None) ->
     Fetch from all sources, pre-filter, dedup, save.
     Returns list of newly inserted Job objects ready for matching.
     """
-    sources = sources or ["adzuna", "remotive", "greenhouse", "lever"]
+    sources = sources or _default_sources()
     all_raw: list[dict] = []
 
     # 1. Fetch

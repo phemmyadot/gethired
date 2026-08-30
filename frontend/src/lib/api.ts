@@ -42,6 +42,8 @@ export type Match = {
 };
 export const getMatches = (minScore = 0) =>
   req<Match[]>(`/matches?min_score=${minScore}`);
+export const applyToMatch = (jobId: string, resumeId: string) =>
+  req(`/matches/${jobId}/${resumeId}/apply`, { method: "POST" });
 
 // ── Applications ───────────────────────────────────────────
 export type Application = {
