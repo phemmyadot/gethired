@@ -165,6 +165,7 @@ def list_matches(
             "remote":        m.job.remote if m.job else False,
             "work_mode":     m.job.work_mode if m.job else None,
             "posted_at":     m.job.posted_at if m.job else None,
+            "fetched_at":    m.job.fetched_at if m.job else None,
             "score":         round(m.score, 3),
             "reasoning":     m.reasoning,
             "missing_skills": m.missing_skills,

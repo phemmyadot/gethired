@@ -8,7 +8,8 @@ export type JobCardData = {
   location: string | null;
   workMode: WorkMode;
   applyUrl: string;
-  postedAt: string;              // ISO date to display — caller resolves the best fallback
+  postedAt: string | null;        // when the source says the job was listed, if known
+  fetchedAt: string;              // when we ingested/last reviewed it
   score?: number;                 // present for matches only
   resumeLabel?: string;           // present for matches only
   applied: boolean;
@@ -27,14 +28,7 @@ function avatarStyle(seed: string) {
   return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
 }
 
-function timeAgo(iso: string) {
-  const diffMs = Date.now() - new Date(iso).getTime();
-  const mins = Math.floor(diffMs / 60000);
-  if (mins < 60) return `${Math.max(mins, 0)}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  const days = Math.floor(hrs / 24);
-  if (days < 30) return `${days}d ago`;
+function shortDate(iso: string) {
   return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
@@ -69,7 +63,10 @@ export function JobCard({ job, onClick, onViewApplication }: {
           <span className="text-xs bg-panel text-ink/70 px-2.5 py-1 rounded-full">
             {job.resumeLabel ?? "Not matched"}
           </span>
-          <span className="text-xs text-muted">{timeAgo(job.postedAt)}</span>
+        </div>
+        <div className="flex items-center gap-3 mt-2 text-xs text-muted">
+          <span>Listed {job.postedAt ? shortDate(job.postedAt) : "—"}</span>
+          <span>Fetched {shortDate(job.fetchedAt)}</span>
         </div>
       </div>
 
