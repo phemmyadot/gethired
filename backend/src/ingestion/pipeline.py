@@ -10,7 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .sources import (
-    fetch_adzuna, fetch_remotive,
+    fetch_adzuna, fetch_remotive, fetch_remoteok, fetch_jobicy, fetch_arbeitnow,
     fetch_greenhouse_all, fetch_lever_all,
 )
 from ..db.models import Job, IngestionLog
@@ -30,7 +30,7 @@ DEFAULT_BLOCKED_TITLES = [
 DEFAULT_REQUIRED_KEYWORDS: list[str] = []  # e.g. ["python", "react"]
 
 def _default_sources() -> list[str]:
-    sources = ["adzuna", "remotive"]
+    sources = ["adzuna", "remotive", "remoteok", "jobicy", "arbeitnow"]
     if os.getenv("GREENHOUSE_ENABLED", "false").lower() == "true":
         sources.append("greenhouse")
     if os.getenv("LEVER_ENABLED", "false").lower() == "true":
@@ -135,6 +135,18 @@ def run_ingestion(db: Session, prefs: dict = None, sources: list[str] = None, lo
     if "remotive" in sources:
         search = (prefs or {}).get("keywords", "")
         all_raw.extend(fetch_remotive(search=search))
+
+    if "remoteok" in sources:
+        search = (prefs or {}).get("keywords", "")
+        all_raw.extend(fetch_remoteok(search=search))
+
+    if "jobicy" in sources:
+        search = (prefs or {}).get("keywords", "")
+        all_raw.extend(fetch_jobicy(search=search))
+
+    if "arbeitnow" in sources:
+        search = (prefs or {}).get("keywords", "")
+        all_raw.extend(fetch_arbeitnow(search=search))
 
     if "greenhouse" in sources:
         all_raw.extend(fetch_greenhouse_all())

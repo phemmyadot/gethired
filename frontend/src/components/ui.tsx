@@ -36,6 +36,9 @@ export function SourceTag({ source }: { source: string }) {
   const colors: Record<string, string> = {
     adzuna:     "text-sky   border-sky/30",
     remotive:   "text-teal  border-teal/30",
+    remoteok:   "text-teal  border-teal/30",
+    jobicy:     "text-sky   border-sky/30",
+    arbeitnow:  "text-amber border-amber/30",
     greenhouse: "text-amber border-amber/30",
     lever:      "text-rose  border-rose/30",
   };

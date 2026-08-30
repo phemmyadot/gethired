@@ -144,6 +144,134 @@ def fetch_remotive(category: str = "", search: str = "") -> list[dict]:
 
 
 # ─────────────────────────────────────────────
+# Source: RemoteOK (remote jobs, no auth)
+# ─────────────────────────────────────────────
+
+def fetch_remoteok(search: str = "") -> list[dict]:
+    """
+    RemoteOK public API — no auth required.
+    https://remoteok.com/api
+    First element in the response is a legal notice, not a job.
+    """
+    data = _get("https://remoteok.com/api")
+    if not data or not isinstance(data, list):
+        return []
+
+    import re
+    search_lower = search.lower()
+
+    jobs = []
+    for r in data:
+        if "id" not in r or "position" not in r:
+            continue  # skip the legal-notice header row
+
+        title = r.get("position", "")
+        desc = re.sub(r"<[^>]+>", " ", r.get("description", "")).strip()
+
+        if search_lower and search_lower not in title.lower() and search_lower not in desc.lower():
+            continue
+
+        jobs.append(_normalize({
+            "source":      "remoteok",
+            "external_id": str(r.get("id", "")),
+            "title":       title,
+            "company":     r.get("company", ""),
+            "description": desc,
+            "location":    r.get("location") or "Worldwide",
+            "remote":      True,
+            "salary_min":  r.get("salary_min") or None,
+            "salary_max":  r.get("salary_max") or None,
+            "apply_url":   r.get("url", ""),
+            "posted_at":   r.get("date"),  # ISO 8601 string
+        }))
+
+    logger.info(f"RemoteOK: fetched {len(jobs)} jobs")
+    return jobs
+
+
+# ─────────────────────────────────────────────
+# Source: Jobicy (remote jobs, no auth)
+# ─────────────────────────────────────────────
+
+def fetch_jobicy(search: str = "") -> list[dict]:
+    """
+    Jobicy public API — no auth required.
+    https://jobicy.com/api/v2/remote-jobs
+    """
+    params = {"count": 50}
+    if search:
+        params["tag"] = search
+    data = _get("https://jobicy.com/api/v2/remote-jobs", params)
+
+    if not data or "jobs" not in data:
+        return []
+
+    import re
+    jobs = []
+    for r in data["jobs"]:
+        desc = re.sub(r"<[^>]+>", " ", r.get("jobDescription", "")).strip()
+        jobs.append(_normalize({
+            "source":      "jobicy",
+            "external_id": str(r.get("id", "")),
+            "title":       r.get("jobTitle", ""),
+            "company":     r.get("companyName", ""),
+            "description": desc,
+            "location":    r.get("jobGeo") or "Worldwide",
+            "remote":      True,
+            "salary_min":  None,
+            "salary_max":  None,
+            "apply_url":   r.get("url", ""),
+            "posted_at":   r.get("pubDate"),  # ISO 8601 string
+        }))
+
+    logger.info(f"Jobicy: fetched {len(jobs)} jobs")
+    return jobs
+
+
+# ─────────────────────────────────────────────
+# Source: Arbeitnow (mixed remote/onsite, mostly EU)
+# ─────────────────────────────────────────────
+
+def fetch_arbeitnow(search: str = "") -> list[dict]:
+    """
+    Arbeitnow public API — no auth required.
+    https://www.arbeitnow.com/api/job-board-api
+    """
+    data = _get("https://www.arbeitnow.com/api/job-board-api")
+    if not data or "data" not in data:
+        return []
+
+    search_lower = search.lower()
+    jobs = []
+    for r in data["data"]:
+        title = r.get("title", "")
+        desc = r.get("description", "")
+
+        if search_lower and search_lower not in title.lower() and search_lower not in desc.lower():
+            continue
+
+        created_at = r.get("created_at")
+        posted_at = datetime.utcfromtimestamp(created_at).isoformat() if created_at else None
+
+        jobs.append(_normalize({
+            "source":      "arbeitnow",
+            "external_id": r.get("slug", ""),
+            "title":       title,
+            "company":     r.get("company_name", ""),
+            "description": desc,
+            "location":    r.get("location") or "",
+            "remote":      bool(r.get("remote", False)),
+            "salary_min":  None,
+            "salary_max":  None,
+            "apply_url":   r.get("url", ""),
+            "posted_at":   posted_at,
+        }))
+
+    logger.info(f"Arbeitnow: fetched {len(jobs)} jobs")
+    return jobs
+
+
+# ─────────────────────────────────────────────
 # Source 3: Greenhouse ATS (per company)
 # ─────────────────────────────────────────────
 
