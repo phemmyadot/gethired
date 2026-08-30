@@ -9,7 +9,6 @@ export function MatchDrawer({ match, onClose, onApplied, onViewApplication }: {
   const [marking, setMarking] = useState(false);
   const [error, setError] = useState("");
   const [coverLetter, setCoverLetter] = useState<string | null>(null);
-  const [applyUrl, setApplyUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
   async function handleGenerate() {
@@ -18,7 +17,6 @@ export function MatchDrawer({ match, onClose, onApplied, onViewApplication }: {
     try {
       const result = await generateCoverLetterForMatch(match.job_id, match.resume_id);
       setCoverLetter(result.cover_letter);
-      setApplyUrl(result.apply_url);
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -53,7 +51,19 @@ export function MatchDrawer({ match, onClose, onApplied, onViewApplication }: {
         <div className="flex items-center justify-between px-6 py-4 border-b border-border sticky top-0 bg-surface z-10">
           <div>
             <div className="font-semibold text-text">{match.job_title}</div>
-            <div className="text-sm text-muted">{match.company}</div>
+            <div className="text-sm text-muted flex items-center gap-2">
+              <span>{match.company}</span>
+              {match.apply_url && (
+                <a
+                  href={match.apply_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs text-sky hover:underline"
+                >
+                  view listing →
+                </a>
+              )}
+            </div>
           </div>
           <div className="flex items-center gap-3">
             <ScoreBadge score={match.score} />
@@ -105,9 +115,9 @@ export function MatchDrawer({ match, onClose, onApplied, onViewApplication }: {
                 </pre>
 
                 <div className="flex items-center gap-2">
-                  {applyUrl && (
+                  {match.apply_url && (
                     <a
-                      href={applyUrl}
+                      href={match.apply_url}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-xs text-sky hover:underline flex-1 truncate"

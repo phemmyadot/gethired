@@ -63,7 +63,7 @@ export function MatchesTab({ matches, resumes, onRefresh, onViewApplication }: {
         <table className="w-full text-sm border-collapse">
           <thead>
             <tr className="border-b border-border">
-              {["Role", "Company", "Resume", "Score", "Status", ""].map(h => (
+              {["Role", "Company", "Resume", "Score", "Status", "", ""].map(h => (
                 <th key={h} className="text-left text-xs text-muted font-normal pb-2 pr-4 whitespace-nowrap">{h}</th>
               ))}
             </tr>
@@ -93,11 +93,24 @@ export function MatchesTab({ matches, resumes, onRefresh, onViewApplication }: {
                     <span className="text-xs text-muted">—</span>
                   )}
                 </td>
+                <td className="py-2.5 pr-4">
+                  {m.apply_url && (
+                    <a
+                      href={m.apply_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs text-sky hover:underline"
+                      onClick={e => e.stopPropagation()}
+                    >
+                      view listing
+                    </a>
+                  )}
+                </td>
                 <td className="py-2.5 text-muted text-xs opacity-0 group-hover:opacity-100 transition-opacity">view →</td>
               </tr>
             ))}
             {filtered.length === 0 && (
-              <tr><td colSpan={6} className="py-12 text-center text-muted text-sm">No matches yet. Run the pipeline to get started.</td></tr>
+              <tr><td colSpan={7} className="py-12 text-center text-muted text-sm">No matches yet. Run the pipeline to get started.</td></tr>
             )}
           </tbody>
         </table>

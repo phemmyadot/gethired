@@ -150,6 +150,7 @@ def list_matches(
             "resume_label":  m.resume.label if m.resume else "",
             "job_title":     m.job.title if m.job else "",
             "company":       m.job.company if m.job else "",
+            "apply_url":     m.job.apply_url if m.job else "",
             "score":         round(m.score, 3),
             "reasoning":     m.reasoning,
             "missing_skills": m.missing_skills,

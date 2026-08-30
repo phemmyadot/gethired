@@ -38,7 +38,7 @@ export const getJobs = (source?: string) =>
 // ── Matches ────────────────────────────────────────────────
 export type Match = {
   job_id: string; resume_id: string; resume_label: string;
-  job_title: string; company: string; score: number;
+  job_title: string; company: string; apply_url: string; score: number;
   reasoning: string; missing_skills: string[]; selling_points: string[];
   applied: boolean; apply_status: string | null; application_id: string | null; reviewed_at: string;
 };
