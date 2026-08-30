@@ -25,7 +25,7 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    command: uvicorn src.api.routes:app --host 0.0.0.0 --port 8000 --reload
+    command: sh -c "alembic upgrade head && uvicorn src.api.routes:app --host 0.0.0.0 --port 8000 --reload"
     volumes:
       - ./backend:/app
       - resume_files:/tmp/jobbot_resumes
