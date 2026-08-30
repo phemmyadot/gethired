@@ -4,16 +4,13 @@ Returns the best resume and score for each job.
 """
 import json
 import logging
-import asyncio
 import concurrent.futures
-from typing import Optional
-from anthropic import Anthropic
 from sqlalchemy.orm import Session
 
 from ..db.models import Job, Resume, JobMatch, AppliedJob
+from ..llm import generate_text
 
 logger = logging.getLogger(__name__)
-client = Anthropic()
 
 SCORE_THRESHOLD = 0.70  # minimum score to auto-apply
 
@@ -64,12 +61,7 @@ def score_one(resume: dict, job: dict) -> dict:
     )
 
     try:
-        response = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=600,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        raw = response.content[0].text.strip()
+        raw = generate_text(prompt)
         result = json.loads(raw)
     except json.JSONDecodeError as e:
         logger.error(f"JSON parse error for {resume['label']} / {job['title']}: {e}")
@@ -82,7 +74,7 @@ def score_one(resume: dict, job: dict) -> dict:
             "recommended_resume": False,
         }
     except Exception as e:
-        logger.error(f"Claude API error: {e}")
+        logger.error(f"LLM API error: {e}")
         result = {"score": 0.0, "reasoning": str(e), "missing_skills": [],
                   "selling_points": [], "seniority_fit": "unknown", "recommended_resume": False}
 

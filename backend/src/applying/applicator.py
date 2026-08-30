@@ -5,13 +5,12 @@ then attempts submission via Greenhouse/Lever APIs or Playwright form fill.
 """
 import logging
 import os
-from anthropic import Anthropic
 from sqlalchemy.orm import Session
 
 from ..db.models import AppliedJob, Job, Resume
+from ..llm import generate_text
 
 logger = logging.getLogger(__name__)
-client = Anthropic()
 
 
 # ─────────────────────────────────────────────
@@ -55,12 +54,7 @@ def generate_cover_letter(
         job_excerpt=job.description[:1500],
     )
     try:
-        response = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=600,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        return response.content[0].text.strip()
+        return generate_text(prompt)
     except Exception as e:
         logger.error(f"Cover letter generation failed: {e}")
         return ""
