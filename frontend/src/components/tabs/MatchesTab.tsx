@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { type Match, type Resume } from "../../lib/api";
-import { ScoreBadge, StatusPill } from "../ui";
+import { ScoreBadge, StatusPill, WorkModeTag } from "../ui";
 import { MatchDrawer } from "../MatchDrawer";
 
 export function MatchesTab({ matches, resumes, onRefresh, onViewApplication }: {
@@ -63,7 +63,7 @@ export function MatchesTab({ matches, resumes, onRefresh, onViewApplication }: {
         <table className="w-full text-sm border-collapse">
           <thead>
             <tr className="border-b border-border">
-              {["Role", "Company", "Resume", "Score", "Status", "", ""].map(h => (
+              {["Role", "Company", "Work mode", "Listed", "Resume", "Score", "Status", "", ""].map(h => (
                 <th key={h} className="text-left text-xs text-muted font-normal pb-2 pr-4 whitespace-nowrap">{h}</th>
               ))}
             </tr>
@@ -77,6 +77,10 @@ export function MatchesTab({ matches, resumes, onRefresh, onViewApplication }: {
               >
                 <td className="py-2.5 pr-4 text-text font-medium max-w-[200px] truncate">{m.job_title}</td>
                 <td className="py-2.5 pr-4 text-muted">{m.company}</td>
+                <td className="py-2.5 pr-4"><WorkModeTag mode={m.work_mode} /></td>
+                <td className="py-2.5 pr-4 text-xs text-muted whitespace-nowrap">
+                  {m.posted_at ? new Date(m.posted_at).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "—"}
+                </td>
                 <td className="py-2.5 pr-4">
                   <span className="text-xs bg-panel border border-border text-text px-2 py-0.5 rounded">{m.resume_label}</span>
                 </td>
@@ -110,7 +114,7 @@ export function MatchesTab({ matches, resumes, onRefresh, onViewApplication }: {
               </tr>
             ))}
             {filtered.length === 0 && (
-              <tr><td colSpan={7} className="py-12 text-center text-muted text-sm">No matches yet. Run the pipeline to get started.</td></tr>
+              <tr><td colSpan={9} className="py-12 text-center text-muted text-sm">No matches yet. Run the pipeline to get started.</td></tr>
             )}
           </tbody>
         </table>

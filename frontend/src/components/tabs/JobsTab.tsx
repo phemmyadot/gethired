@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { type Job } from "../../lib/api";
-import { SourceTag } from "../ui";
+import { SourceTag, WorkModeTag } from "../ui";
 
 export function JobsTab({ jobs, onViewApplication }: {
   jobs: Job[]; onViewApplication: (applicationId: string) => void;
@@ -32,7 +32,7 @@ export function JobsTab({ jobs, onViewApplication }: {
         <table className="w-full text-sm border-collapse">
           <thead>
             <tr className="border-b border-border">
-              {["Role", "Company", "Location", "Source", "Fetched", "", ""].map(h => (
+              {["Role", "Company", "Location", "Work mode", "Source", "Listed", "", ""].map(h => (
                 <th key={h} className="text-left text-xs text-muted font-normal pb-2 pr-4 whitespace-nowrap">{h}</th>
               ))}
             </tr>
@@ -42,10 +42,11 @@ export function JobsTab({ jobs, onViewApplication }: {
               <tr key={i} className="border-b border-border/50 hover:bg-panel/40 transition-colors">
                 <td className="py-2.5 pr-4 text-text max-w-[200px] truncate">{j.title}</td>
                 <td className="py-2.5 pr-4 text-muted">{j.company}</td>
-                <td className="py-2.5 pr-4 text-xs text-muted">{j.remote ? "Remote" : j.location || "—"}</td>
+                <td className="py-2.5 pr-4 text-xs text-muted">{j.location || "—"}</td>
+                <td className="py-2.5 pr-4"><WorkModeTag mode={j.work_mode} /></td>
                 <td className="py-2.5 pr-4"><SourceTag source={j.source} /></td>
                 <td className="py-2.5 pr-4 text-xs text-muted whitespace-nowrap">
-                  {new Date(j.fetched_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                  {new Date(j.posted_at ?? j.fetched_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
                 </td>
                 <td className="py-2.5 pr-4">
                   {j.applied && j.application_id ? (
@@ -73,7 +74,7 @@ export function JobsTab({ jobs, onViewApplication }: {
               </tr>
             ))}
             {filtered.length === 0 && (
-              <tr><td colSpan={7} className="py-12 text-center text-muted text-sm">No jobs fetched yet.</td></tr>
+              <tr><td colSpan={8} className="py-12 text-center text-muted text-sm">No jobs fetched yet.</td></tr>
             )}
           </tbody>
         </table>

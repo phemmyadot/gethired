@@ -27,9 +27,11 @@ export async function uploadResume(file: File, label: string): Promise<Resume> {
 }
 
 // ── Jobs ───────────────────────────────────────────────────
+export type WorkMode = "remote" | "hybrid" | "onsite" | null;
 export type Job = {
   id: string; title: string; company: string; source: string;
-  location: string; remote: boolean; apply_url: string; fetched_at: string;
+  location: string; remote: boolean; work_mode: WorkMode; apply_url: string;
+  fetched_at: string; posted_at: string | null;
   applied: boolean; application_id: string | null;
 };
 export const getJobs = (source?: string) =>
@@ -38,7 +40,8 @@ export const getJobs = (source?: string) =>
 // ── Matches ────────────────────────────────────────────────
 export type Match = {
   job_id: string; resume_id: string; resume_label: string;
-  job_title: string; company: string; apply_url: string; score: number;
+  job_title: string; company: string; apply_url: string; work_mode: WorkMode;
+  posted_at: string | null; score: number;
   reasoning: string; missing_skills: string[]; selling_points: string[];
   applied: boolean; apply_status: string | null; application_id: string | null; reviewed_at: string;
 };

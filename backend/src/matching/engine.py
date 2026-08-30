@@ -19,6 +19,34 @@ SCORE_THRESHOLD = 0.70  # minimum score to auto-apply
 # Claude scoring prompt
 # ─────────────────────────────────────────────
 
+WORK_MODE_PROMPT = """Read this job description and determine its work mode.
+
+JOB TITLE: {title}
+JOB DESCRIPTION:
+{description}
+
+Respond ONLY with valid JSON — no markdown, no preamble:
+{{"work_mode": "remote|hybrid|onsite"}}
+
+remote: fully remote, no office attendance required
+hybrid: some in-office days required alongside remote work
+onsite: full-time in-office / no remote option mentioned
+If unclear from the text, make your best guess from context (title, seniority, industry norms)."""
+
+
+def detect_work_mode(job: dict) -> str:
+    """Classify a job's work mode via the LLM. One call per job, not per resume."""
+    try:
+        prompt = WORK_MODE_PROMPT.format(title=job["title"], description=job["description"][:2000])
+        raw = generate_text(prompt)
+        result = json.loads(raw)
+        mode = result.get("work_mode", "").lower()
+        return mode if mode in ("remote", "hybrid", "onsite") else "onsite"
+    except Exception as e:
+        logger.error(f"Work mode detection failed: {e}")
+        return "onsite"
+
+
 SCORE_PROMPT = """You are a senior technical recruiter with 15 years experience.
 Evaluate how well this candidate's resume matches the job description.
 
@@ -181,6 +209,10 @@ def process_jobs_for_matching(
             "company":     job.company,
             "description": job.description,
         }
+
+        if not job.work_mode:
+            job.work_mode = detect_work_mode(job_dict)
+            db.commit()
 
         logger.info(f"Scoring: {job.title} @ {job.company} against {len(resume_dicts)} resumes")
         scores = score_job_all_resumes(job_dict, resume_dicts)

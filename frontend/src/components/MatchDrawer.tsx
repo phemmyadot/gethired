@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { generateCoverLetterForMatch, markMatchApplied, type Match } from "../lib/api";
-import { ScoreBadge, StatusPill } from "./ui";
+import { ScoreBadge, StatusPill, WorkModeTag } from "./ui";
 
 export function MatchDrawer({ match, onClose, onApplied, onViewApplication }: {
   match: Match; onClose: () => void; onApplied: () => void; onViewApplication: (applicationId: string) => void;
@@ -53,6 +53,7 @@ export function MatchDrawer({ match, onClose, onApplied, onViewApplication }: {
             <div className="font-semibold text-text">{match.job_title}</div>
             <div className="text-sm text-muted flex items-center gap-2">
               <span>{match.company}</span>
+              <WorkModeTag mode={match.work_mode} />
               {match.apply_url && (
                 <a
                   href={match.apply_url}

@@ -42,6 +42,7 @@ def _normalize(job: dict) -> dict:
         "salary_min":  job.get("salary_min"),
         "salary_max":  job.get("salary_max"),
         "apply_url":   job.get("apply_url", ""),
+        "posted_at":   job.get("posted_at"),  # when the source says the job was listed, if known
     }
 
 
@@ -92,6 +93,7 @@ def fetch_adzuna(
             "salary_min":  r.get("salary_min"),
             "salary_max":  r.get("salary_max"),
             "apply_url":   r.get("redirect_url", ""),
+            "posted_at":   r.get("created"),  # ISO 8601 string
         }))
 
     logger.info(f"Adzuna: fetched {len(jobs)} jobs")
@@ -134,6 +136,7 @@ def fetch_remotive(category: str = "", search: str = "") -> list[dict]:
             "salary_min":  None,
             "salary_max":  None,
             "apply_url":   r.get("url", ""),
+            "posted_at":   r.get("publication_date"),  # ISO 8601 string
         }))
 
     logger.info(f"Remotive: fetched {len(jobs)} jobs")
@@ -184,6 +187,7 @@ def fetch_greenhouse_company(board_token: str) -> list[dict]:
             "salary_min":  None,
             "salary_max":  None,
             "apply_url":   r.get("absolute_url", ""),
+            "posted_at":   r.get("updated_at"),  # ISO 8601 string; Greenhouse doesn't expose original post date
         }))
 
     return jobs
@@ -238,6 +242,9 @@ def fetch_lever_company(company: str) -> list[dict]:
                 items_clean = re.sub(r"<[^>]+>", " ", items)
                 desc_parts.append(items_clean)
 
+        created_at_ms = r.get("createdAt")
+        posted_at = datetime.utcfromtimestamp(created_at_ms / 1000).isoformat() if created_at_ms else None
+
         jobs.append(_normalize({
             "source":      "lever",
             "external_id": r.get("id", ""),
@@ -249,6 +256,7 @@ def fetch_lever_company(company: str) -> list[dict]:
             "salary_min":  None,
             "salary_max":  None,
             "apply_url":   r.get("applyUrl", r.get("hostedUrl", "")),
+            "posted_at":   posted_at,
         }))
 
     return jobs

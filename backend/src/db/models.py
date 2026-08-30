@@ -59,11 +59,13 @@ class Job(Base):
     description = Column(Text, nullable=False)
     location    = Column(String(255))
     remote      = Column(Boolean, default=False)
+    work_mode   = Column(String(20))  # remote|hybrid|onsite — derived by the LLM during matching
     salary_min  = Column(Float)
     salary_max  = Column(Float)
     apply_url   = Column(String(1000), nullable=False)
     expired     = Column(Boolean, default=False)
     fetched_at  = Column(DateTime, default=datetime.utcnow)
+    posted_at   = Column(DateTime)  # when the source says the job was listed, if known
     expires_at  = Column(DateTime)
 
     __table_args__ = (

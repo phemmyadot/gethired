@@ -46,6 +46,21 @@ export function SourceTag({ source }: { source: string }) {
   );
 }
 
+// ── Work mode tag ──────────────────────────────────────────
+export function WorkModeTag({ mode }: { mode: "remote" | "hybrid" | "onsite" | null }) {
+  if (!mode) return <span className="text-xs text-muted">—</span>;
+  const colors: Record<string, string> = {
+    remote: "text-teal  border-teal/30",
+    hybrid: "text-amber border-amber/30",
+    onsite: "text-muted border-border",
+  };
+  return (
+    <span className={`text-xs px-1.5 py-0.5 rounded border capitalize ${colors[mode] ?? "text-muted border-border"}`}>
+      {mode}
+    </span>
+  );
+}
+
 // ── Stat card ──────────────────────────────────────────────
 export function StatCard({ label, value, accent }: { label: string; value: number | string; accent?: string }) {
   return (

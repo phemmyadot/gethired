@@ -76,6 +76,15 @@ def pre_filter(job: dict, prefs: dict = None) -> bool:
 # Save to DB (with dedup via UNIQUE constraint)
 # ─────────────────────────────────────────────
 
+def _parse_posted_at(value) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).replace(tzinfo=None)
+    except ValueError:
+        return None
+
+
 def save_job(job_dict: dict, db: Session) -> tuple[Job | None, bool]:
     """
     Insert job if new. Returns (Job, is_new).
@@ -89,6 +98,7 @@ def save_job(job_dict: dict, db: Session) -> tuple[Job | None, bool]:
     if existing:
         return existing, False
 
+    job_dict = {**job_dict, "posted_at": _parse_posted_at(job_dict.get("posted_at"))}
     job = Job(**job_dict)
     try:
         db.add(job)

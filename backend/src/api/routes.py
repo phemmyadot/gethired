@@ -116,7 +116,8 @@ def list_jobs(
         results.append({
             "id": str(j.id), "title": j.title, "company": j.company,
             "source": j.source, "location": j.location, "remote": j.remote,
-            "apply_url": j.apply_url, "fetched_at": j.fetched_at,
+            "work_mode": j.work_mode,
+            "apply_url": j.apply_url, "fetched_at": j.fetched_at, "posted_at": j.posted_at,
             "applied": applied is not None,
             "application_id": str(applied.id) if applied else None,
         })
@@ -151,6 +152,8 @@ def list_matches(
             "job_title":     m.job.title if m.job else "",
             "company":       m.job.company if m.job else "",
             "apply_url":     m.job.apply_url if m.job else "",
+            "work_mode":     m.job.work_mode if m.job else None,
+            "posted_at":     m.job.posted_at if m.job else None,
             "score":         round(m.score, 3),
             "reasoning":     m.reasoning,
             "missing_skills": m.missing_skills,
