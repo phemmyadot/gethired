@@ -1,32 +1,33 @@
 import { type Stats } from "../../lib/api";
 
 export function DashboardTab({ stats }: { stats: Stats | null }) {
+  const threshold = Math.round((stats?.score_threshold ?? 0.7) * 100);
   const funnelSteps = [
-    { label: "Jobs fetched",  value: stats?.total_jobs ?? 0,    color: "bg-sky/20   border-sky/30",   text: "text-sky" },
-    { label: "Matches ≥70%",  value: stats?.total_matches ?? 0, color: "bg-teal/20  border-teal/30",  text: "text-teal" },
-    { label: "Applied",       value: stats?.total_applied ?? 0, color: "bg-teal/30  border-teal/50",  text: "text-teal" },
-    { label: "Interviews",    value: stats?.interviews ?? 0,     color: "bg-amber/20 border-amber/30", text: "text-amber" },
-    { label: "Offers",        value: stats?.offers ?? 0,         color: "bg-teal/40  border-teal/60",  text: "text-teal" },
+    { label: "Jobs fetched",     value: stats?.total_jobs ?? 0,     color: "bg-sky",   text: "text-sky",   soft: "bg-sky-soft" },
+    { label: `Matches ≥${threshold}%`, value: stats?.total_matches ?? 0, color: "bg-accent", text: "text-accent", soft: "bg-accent-soft" },
+    { label: "Applied",          value: stats?.total_applied ?? 0,  color: "bg-teal",  text: "text-teal",  soft: "bg-teal-soft" },
+    { label: "Interviews",       value: stats?.interviews ?? 0,     color: "bg-amber", text: "text-amber", soft: "bg-amber-soft" },
+    { label: "Offers",           value: stats?.offers ?? 0,         color: "bg-teal",  text: "text-teal",  soft: "bg-teal-soft" },
   ];
 
   const max = Math.max(...funnelSteps.map(s => s.value), 1);
 
   return (
     <div className="flex flex-col gap-8">
-      <div>
-        <h2 className="text-sm font-semibold text-text mb-4">Pipeline funnel</h2>
-        <div className="flex flex-col gap-2">
+      <div className="bg-surface rounded-xl2 border border-border/60 shadow-card p-6">
+        <h2 className="font-display text-lg font-semibold text-ink mb-6">Pipeline funnel</h2>
+        <div className="flex flex-col gap-3">
           {funnelSteps.map((step, i) => {
-            const width = Math.max((step.value / max) * 100, 4);
+            const width = Math.max((step.value / max) * 100, 3);
             return (
               <div key={i} className="flex items-center gap-4">
-                <div className="w-28 text-xs text-muted text-right shrink-0">{step.label}</div>
-                <div className="flex-1 bg-panel rounded h-8 overflow-hidden border border-border">
+                <div className="w-32 text-sm text-muted text-right shrink-0">{step.label}</div>
+                <div className={`flex-1 ${step.soft} rounded-full h-9 overflow-hidden`}>
                   <div
-                    className={`h-full border-r ${step.color} transition-all duration-500 flex items-center pl-3`}
+                    className={`h-full ${step.color} rounded-full transition-all duration-700 flex items-center pl-4`}
                     style={{ width: `${width}%` }}
                   >
-                    <span className={`font-mono text-sm font-bold ${step.text}`}>{step.value}</span>
+                    <span className="font-mono text-sm font-semibold text-white">{step.value}</span>
                   </div>
                 </div>
               </div>
@@ -36,25 +37,25 @@ export function DashboardTab({ stats }: { stats: Stats | null }) {
       </div>
 
       <div>
-        <h2 className="text-sm font-semibold text-text mb-4">At a glance</h2>
-        <div className="grid grid-cols-2 gap-4 text-sm text-text">
-          <div className="bg-panel border border-border rounded p-4 flex flex-col gap-1">
-            <span className="text-xs text-muted">Apply rate</span>
-            <span className="font-mono text-xl text-teal">
+        <h2 className="font-display text-lg font-semibold text-ink mb-4">At a glance</h2>
+        <div className="grid grid-cols-2 gap-5">
+          <div className="bg-surface rounded-xl2 border border-border/60 shadow-card p-6 flex flex-col gap-1.5">
+            <span className="text-xs font-medium text-muted uppercase tracking-wide">Apply rate</span>
+            <span className="font-display text-3xl font-semibold text-teal">
               {stats?.total_matches
                 ? `${Math.round((stats.total_applied / stats.total_matches) * 100)}%`
                 : "—"}
             </span>
-            <span className="text-xs text-muted">of matches auto-applied</span>
+            <span className="text-sm text-muted">of matches applied to</span>
           </div>
-          <div className="bg-panel border border-border rounded p-4 flex flex-col gap-1">
-            <span className="text-xs text-muted">Interview rate</span>
-            <span className="font-mono text-xl text-amber">
+          <div className="bg-surface rounded-xl2 border border-border/60 shadow-card p-6 flex flex-col gap-1.5">
+            <span className="text-xs font-medium text-muted uppercase tracking-wide">Interview rate</span>
+            <span className="font-display text-3xl font-semibold text-amber">
               {stats?.total_applied
                 ? `${Math.round(((stats.interviews ?? 0) / stats.total_applied) * 100)}%`
                 : "—"}
             </span>
-            <span className="text-xs text-muted">of applications → interview</span>
+            <span className="text-sm text-muted">of applications → interview</span>
           </div>
         </div>
       </div>

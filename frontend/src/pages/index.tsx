@@ -91,7 +91,7 @@ export default function Home() {
   ];
 
   return (
-    <div className="flex h-screen overflow-hidden bg-ink">
+    <div className="flex h-screen overflow-hidden bg-paper">
       <Head>
         <title>JobBot — AI application engine</title>
       </Head>
@@ -108,7 +108,7 @@ export default function Home() {
       <main className="flex-1 flex flex-col overflow-hidden">
         <StatsStrip stats={stats} />
 
-        <div className="flex-1 overflow-y-auto p-6">
+        <div className="flex-1 overflow-y-auto px-8 pb-8">
           {tab === "dashboard"    && <DashboardTab stats={stats} />}
           {tab === "matches"      && <MatchesTab matches={matches} resumes={resumes} onRefresh={load} onViewApplication={viewApplication} />}
           {tab === "applications" && <ApplicationsTab apps={apps} onRefresh={load} focusedAppId={focusedAppId} onFocusHandled={() => setFocusedAppId(null)} />}

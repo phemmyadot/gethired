@@ -18,21 +18,23 @@ export function MatchesTab({ matches, resumes, onRefresh, onViewApplication }: {
   const profiledResumes = resumes.filter(r => r.search_keywords || r.required_keywords.length > 0);
 
   return (
-    <div className="flex flex-col gap-4 h-full">
+    <div className="flex flex-col gap-6">
       {profiledResumes.length > 0 && (
-        <div className="bg-panel border border-border rounded p-4 flex flex-col gap-2">
-          <div className="text-xs text-muted">Searching for, based on your resume{profiledResumes.length !== 1 ? "s" : ""}</div>
-          <div className="flex flex-col gap-2">
+        <div className="bg-accent-soft rounded-xl2 p-5 flex flex-col gap-3">
+          <div className="text-xs font-medium text-accent uppercase tracking-wide">
+            Searching for, based on your resume{profiledResumes.length !== 1 ? "s" : ""}
+          </div>
+          <div className="flex flex-col gap-2.5">
             {profiledResumes.map(r => (
               <div key={r.id} className="flex items-center gap-2 flex-wrap">
-                <span className="text-xs bg-teal/10 border border-teal/30 text-teal px-2 py-0.5 rounded whitespace-nowrap">
+                <span className="text-xs font-medium bg-white text-accent px-2.5 py-1 rounded-full whitespace-nowrap">
                   {r.label}
                 </span>
                 {r.search_keywords && (
-                  <span className="text-sm text-text font-medium">"{r.search_keywords}"</span>
+                  <span className="font-display text-base text-ink">"{r.search_keywords}"</span>
                 )}
                 {r.required_keywords.map((k, i) => (
-                  <span key={i} className="text-xs bg-panel border border-border text-muted px-2 py-0.5 rounded">
+                  <span key={i} className="text-xs bg-white/70 text-ink/70 px-2.5 py-1 rounded-full">
                     {k}
                   </span>
                 ))}
@@ -47,78 +49,75 @@ export function MatchesTab({ matches, resumes, onRefresh, onViewApplication }: {
           <button
             key={f}
             onClick={() => setFilter(f)}
-            className={`text-xs px-3 py-1.5 rounded border transition-colors capitalize ${
+            className={`text-xs font-medium px-3.5 py-1.5 rounded-full transition-colors capitalize ${
               filter === f
-                ? "bg-teal/10 border-teal/40 text-teal"
-                : "border-border text-muted hover:text-text"
+                ? "bg-ink text-paper"
+                : "bg-panel text-muted hover:text-ink"
             }`}
           >
             {f}
           </button>
         ))}
-        <span className="ml-auto text-xs text-muted">{filtered.length} results</span>
+        <span className="ml-auto text-sm text-muted">{filtered.length} results</span>
       </div>
 
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm border-collapse">
-          <thead>
-            <tr className="border-b border-border">
-              {["Role", "Company", "Work mode", "Listed", "Resume", "Score", "Status", "", ""].map(h => (
-                <th key={h} className="text-left text-xs text-muted font-normal pb-2 pr-4 whitespace-nowrap">{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map((m, i) => (
-              <tr
-                key={i}
-                className="border-b border-border/50 hover:bg-panel/60 cursor-pointer transition-colors group"
-                onClick={() => setSelected(m)}
-              >
-                <td className="py-2.5 pr-4 text-text font-medium max-w-[200px] truncate">{m.job_title}</td>
-                <td className="py-2.5 pr-4 text-muted">{m.company}</td>
-                <td className="py-2.5 pr-4"><WorkModeTag mode={m.work_mode} /></td>
-                <td className="py-2.5 pr-4 text-xs text-muted whitespace-nowrap">
-                  {m.posted_at ? new Date(m.posted_at).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "—"}
-                </td>
-                <td className="py-2.5 pr-4">
-                  <span className="text-xs bg-panel border border-border text-text px-2 py-0.5 rounded">{m.resume_label}</span>
-                </td>
-                <td className="py-2.5 pr-4"><ScoreBadge score={m.score} /></td>
-                <td className="py-2.5 pr-4">
-                  {m.applied && m.application_id ? (
-                    <button
-                      onClick={e => { e.stopPropagation(); onViewApplication(m.application_id!); }}
-                      className="hover:opacity-80 transition-opacity"
-                    >
-                      <StatusPill status={m.apply_status ?? "applied"} />
-                    </button>
-                  ) : (
-                    <span className="text-xs text-muted">—</span>
-                  )}
-                </td>
-                <td className="py-2.5 pr-4">
-                  {m.apply_url && (
-                    <a
-                      href={m.apply_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-xs text-sky hover:underline"
-                      onClick={e => e.stopPropagation()}
-                    >
-                      view listing
-                    </a>
-                  )}
-                </td>
-                <td className="py-2.5 text-muted text-xs opacity-0 group-hover:opacity-100 transition-opacity">view →</td>
-              </tr>
-            ))}
-            {filtered.length === 0 && (
-              <tr><td colSpan={9} className="py-12 text-center text-muted text-sm">No matches yet. Run the pipeline to get started.</td></tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      {filtered.length === 0 ? (
+        <div className="py-20 text-center text-muted text-sm bg-surface rounded-xl2 border border-dashed border-border">
+          No matches yet. Run the pipeline to get started.
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-5">
+          {filtered.map((m, i) => (
+            <div
+              key={i}
+              onClick={() => setSelected(m)}
+              className="bg-surface rounded-xl2 border border-border/60 shadow-card hover:shadow-card-hover transition-shadow p-5 flex flex-col gap-4 cursor-pointer"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="font-display text-lg font-semibold text-ink leading-snug truncate">{m.job_title}</div>
+                  <div className="text-sm text-muted mt-0.5">{m.company}</div>
+                </div>
+                <ScoreBadge score={m.score} />
+              </div>
+
+              <div className="flex items-center gap-2 flex-wrap">
+                <WorkModeTag mode={m.work_mode} />
+                <span className="text-xs bg-panel text-ink/70 px-2.5 py-1 rounded-full">{m.resume_label}</span>
+                {m.posted_at && (
+                  <span className="text-xs text-muted">
+                    {new Date(m.posted_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                  </span>
+                )}
+              </div>
+
+              <div className="flex items-center justify-between gap-2 mt-auto pt-3 border-t border-border/60">
+                {m.applied && m.application_id ? (
+                  <button
+                    onClick={e => { e.stopPropagation(); onViewApplication(m.application_id!); }}
+                    className="hover:opacity-80 transition-opacity"
+                  >
+                    <StatusPill status={m.apply_status ?? "applied"} />
+                  </button>
+                ) : (
+                  <span className="text-sm text-muted">Not applied</span>
+                )}
+                {m.apply_url && (
+                  <a
+                    href={m.apply_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-sm font-semibold px-4 py-2 rounded-full bg-accent-soft text-accent hover:bg-accent hover:text-white transition-colors"
+                    onClick={e => e.stopPropagation()}
+                  >
+                    View listing
+                  </a>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {selected && (
         <MatchDrawer

@@ -25,18 +25,18 @@ export function Sidebar({ tab, onTabChange, navItems, pipelineRunning, onRunPipe
 }) {
   const inProgress = pipelineStatus && ["running", "ingesting", "matching", "applying"].includes(pipelineStatus.status);
   return (
-    <aside className="w-52 shrink-0 bg-surface border-r border-border flex flex-col">
+    <aside className="w-60 shrink-0 bg-paper border-r border-border flex flex-col">
       {/* Logo */}
-      <div className="px-4 py-5 border-b border-border">
-        <div className="flex items-center gap-2">
-          <img src="/icon.svg" alt="" width={22} height={22} className="rounded" />
-          <span className="text-text font-semibold text-sm">JobBot</span>
+      <div className="px-5 py-6">
+        <div className="flex items-center gap-2.5">
+          <img src="/icon.svg" alt="" width={30} height={30} className="rounded-lg" />
+          <span className="font-display text-xl font-semibold text-ink">JobBot</span>
         </div>
-        <div className="text-xs text-muted mt-0.5">AI application engine</div>
+        <div className="text-xs text-muted mt-1 pl-[2px]">AI application engine</div>
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 py-3 flex flex-col gap-0.5">
+      <nav className="flex-1 px-3 flex flex-col gap-1">
         {navItems.map(item => (
           <NavItem
             key={item.id}
@@ -50,19 +50,20 @@ export function Sidebar({ tab, onTabChange, navItems, pipelineRunning, onRunPipe
       </nav>
 
       {/* Pipeline trigger */}
-      <div className="p-4 border-t border-border flex flex-col gap-2">
+      <div className="p-4 flex flex-col gap-3">
+        <div className="h-px bg-border" />
         <button
           onClick={onRunPipeline}
           disabled={pipelineRunning || !!inProgress}
-          className="w-full text-xs font-semibold py-2 rounded bg-teal text-ink hover:bg-teal/90 disabled:opacity-50 transition-colors"
+          className="w-full text-sm font-semibold py-2.5 rounded-xl bg-ink text-paper hover:bg-ink/85 disabled:opacity-50 transition-colors shadow-card"
         >
-          {pipelineRunning || inProgress ? "Running…" : "▶ Run pipeline"}
+          {pipelineRunning || inProgress ? "Running…" : "Run pipeline"}
         </button>
 
         {inProgress && pipelineStatus && (
-          <div className="text-xs text-muted flex flex-col gap-0.5">
-            <div className="flex items-center gap-1.5 text-teal">
-              <span className="inline-block w-1.5 h-1.5 rounded-full bg-teal animate-pulse" />
+          <div className="text-xs text-muted flex flex-col gap-1 bg-panel rounded-xl px-3 py-2.5">
+            <div className="flex items-center gap-1.5 text-accent font-medium">
+              <span className="inline-block w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
               {STAGE_LABELS[pipelineStatus.status] ?? pipelineStatus.status}
             </div>
             {pipelineStatus.jobs_found > 0 && (
@@ -75,7 +76,7 @@ export function Sidebar({ tab, onTabChange, navItems, pipelineRunning, onRunPipe
         )}
 
         {!inProgress && pipelineStatus?.status === "failed" && (
-          <div className="text-xs text-rose">{pipelineStatus.error ?? "Pipeline failed"}</div>
+          <div className="text-xs text-rose bg-rose-soft rounded-xl px-3 py-2.5">{pipelineStatus.error ?? "Pipeline failed"}</div>
         )}
 
         {lastRun && <div className="text-xs text-muted text-center">Last run {lastRun}</div>}

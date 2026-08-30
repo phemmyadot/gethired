@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Public+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -6,17 +6,27 @@
 
 html, body {
   height: 100%;
-  font-family: Inter, system-ui, sans-serif;
+  font-family: 'Public Sans', system-ui, sans-serif;
+  background: #FAF7F2;
+  color: #1C1A17;
 }
 
 ::-webkit-scrollbar {
-  width: 4px;
-  height: 4px;
+  width: 6px;
+  height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: #1C2B3A;
+  background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #2E4057;
-  border-radius: 2px;
+  background: #E7E0D4;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #D8CFC0;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #E7E0D4 transparent;
 }
