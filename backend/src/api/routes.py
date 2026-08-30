@@ -12,9 +12,9 @@ from sqlalchemy import desc
 from ..db.models import get_session, Base, get_engine, Resume, Job, JobMatch, AppliedJob, IngestionLog
 from ..matching.resume_parser import extract_resume_text, clean_text
 from ..ingestion.pipeline import run_ingestion
-from ..matching.engine import process_jobs_for_matching
+from ..matching.engine import process_jobs_for_matching, SCORE_THRESHOLD
 from ..matching.profile import extract_profile
-from ..applying.applicator import run_applications
+from ..applying.applicator import run_applications, generate_cover_letter
 
 app = FastAPI(title="JobBot API", version="1.0.0")
 
@@ -81,7 +81,8 @@ async def upload_resume(
 def list_resumes(db: Session = Depends(get_db)):
     resumes = db.query(Resume).filter_by(user_id=USER_ID, active=True).all()
     return [{"id": str(r.id), "label": r.label, "filename": r.filename,
-             "created_at": r.created_at} for r in resumes]
+             "created_at": r.created_at, "search_keywords": r.search_keywords,
+             "required_keywords": r.required_keywords or []} for r in resumes]
 
 
 @app.delete("/resumes/{resume_id}")
@@ -109,14 +110,17 @@ def list_jobs(
     if source:
         q = q.filter_by(source=source)
     jobs = q.order_by(desc(Job.fetched_at)).limit(limit).offset(offset).all()
-    return [
-        {
+    results = []
+    for j in jobs:
+        applied = db.query(AppliedJob).filter_by(job_id=j.id).first()
+        results.append({
             "id": str(j.id), "title": j.title, "company": j.company,
             "source": j.source, "location": j.location, "remote": j.remote,
             "apply_url": j.apply_url, "fetched_at": j.fetched_at,
-        }
-        for j in jobs
-    ]
+            "applied": applied is not None,
+            "application_id": str(applied.id) if applied else None,
+        })
+    return results
 
 
 # ─────────────────────────────────────────────
@@ -152,6 +156,7 @@ def list_matches(
             "selling_points": m.selling_points,
             "applied":       applied is not None,
             "apply_status":  applied.status if applied else None,
+            "application_id": str(applied.id) if applied else None,
             "reviewed_at":   m.reviewed_at,
         })
     return results
@@ -174,6 +179,38 @@ def apply_to_match(job_id: UUID, resume_id: UUID, db: Session = Depends(get_db))
     }
     run_applications([candidate], db)
     return {"message": "Application submitted"}
+
+
+@app.post("/matches/{job_id}/{resume_id}/cover-letter")
+def generate_cover_letter_for_match(job_id: UUID, resume_id: UUID, db: Session = Depends(get_db)):
+    """Generate a cover letter for manual apply — does not submit or record anything."""
+    match = db.query(JobMatch).filter_by(job_id=job_id, resume_id=resume_id).first()
+    if not match:
+        raise HTTPException(404, "Match not found")
+
+    cover_letter = generate_cover_letter(match.resume, match.job, match.selling_points or [])
+    return {"cover_letter": cover_letter, "apply_url": match.job.apply_url}
+
+
+@app.post("/matches/{job_id}/{resume_id}/mark-applied")
+def mark_match_applied(job_id: UUID, resume_id: UUID, cover_letter: str = "", db: Session = Depends(get_db)):
+    """Record that the user manually applied outside the app — no submission attempt."""
+    match = db.query(JobMatch).filter_by(job_id=job_id, resume_id=resume_id).first()
+    if not match:
+        raise HTTPException(404, "Match not found")
+    if db.query(AppliedJob).filter_by(job_id=job_id).first():
+        raise HTTPException(409, "Already applied to this job")
+
+    record = AppliedJob(
+        job_id=job_id,
+        resume_id=resume_id,
+        match_score=match.score,
+        cover_letter=cover_letter,
+        status="applied",
+    )
+    db.add(record)
+    db.commit()
+    return {"message": "Marked as applied"}
 
 
 # ─────────────────────────────────────────────
@@ -264,6 +301,9 @@ def _run_full_pipeline():
             "keywords": profile["search_keywords"],
             "required_keywords": profile["required_keywords"],
         }
+        latest_resume.search_keywords = profile["search_keywords"]
+        latest_resume.required_keywords = profile["required_keywords"]
+        db.commit()
 
         log.status = "ingesting"
         db.commit()
@@ -305,11 +345,12 @@ def get_stats(db: Session = Depends(get_db)):
     return {
         "total_jobs":       db.query(Job).count(),
         "total_resumes":    db.query(Resume).filter_by(active=True).count(),
-        "total_matches":    db.query(JobMatch).filter(JobMatch.score >= 0.7).count(),
+        "total_matches":    db.query(JobMatch).filter(JobMatch.score >= SCORE_THRESHOLD).count(),
         "total_applied":    db.query(AppliedJob).filter_by(status="applied").count(),
         "interviews":       db.query(AppliedJob).filter_by(status="interview").count(),
         "offers":           db.query(AppliedJob).filter_by(status="offer").count(),
         "last_run":         db.query(IngestionLog).order_by(desc(IngestionLog.ran_at)).first(),
+        "score_threshold":  SCORE_THRESHOLD,
     }
 
 

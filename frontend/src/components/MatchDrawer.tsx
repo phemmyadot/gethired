@@ -1,21 +1,48 @@
 import { useState } from "react";
-import { applyToMatch, type Match } from "../lib/api";
+import { generateCoverLetterForMatch, markMatchApplied, type Match } from "../lib/api";
 import { ScoreBadge, StatusPill } from "./ui";
 
-export function MatchDrawer({ match, onClose, onApplied }: { match: Match; onClose: () => void; onApplied: () => void }) {
-  const [applying, setApplying] = useState(false);
+export function MatchDrawer({ match, onClose, onApplied, onViewApplication }: {
+  match: Match; onClose: () => void; onApplied: () => void; onViewApplication: (applicationId: string) => void;
+}) {
+  const [generating, setGenerating] = useState(false);
+  const [marking, setMarking] = useState(false);
   const [error, setError] = useState("");
+  const [coverLetter, setCoverLetter] = useState<string | null>(null);
+  const [applyUrl, setApplyUrl] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
-  async function handleApply() {
-    setApplying(true);
+  async function handleGenerate() {
+    setGenerating(true);
     setError("");
     try {
-      await applyToMatch(match.job_id, match.resume_id);
+      const result = await generateCoverLetterForMatch(match.job_id, match.resume_id);
+      setCoverLetter(result.cover_letter);
+      setApplyUrl(result.apply_url);
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  async function handleCopy() {
+    if (!coverLetter) return;
+    await navigator.clipboard.writeText(coverLetter);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
+  async function handleMarkApplied() {
+    setMarking(true);
+    setError("");
+    try {
+      await markMatchApplied(match.job_id, match.resume_id, coverLetter ?? "");
       onApplied();
     } catch (e: any) {
       setError(e.message);
     } finally {
-      setApplying(false);
+      setMarking(false);
     }
   }
 
@@ -35,7 +62,7 @@ export function MatchDrawer({ match, onClose, onApplied }: { match: Match; onClo
         </div>
 
         <div className="px-6 py-5 flex flex-col gap-6">
-          {/* Resume used */}
+          {/* Resume used + apply flow */}
           <section>
             <div className="text-xs text-muted mb-2">Resume matched</div>
             <div className="flex items-center gap-2 flex-wrap">
@@ -43,18 +70,61 @@ export function MatchDrawer({ match, onClose, onApplied }: { match: Match; onClo
                 {match.resume_label}
               </span>
               {match.applied ? (
-                <StatusPill status={match.apply_status ?? "applied"} />
-              ) : (
+                match.application_id ? (
+                  <button
+                    onClick={() => onViewApplication(match.application_id!)}
+                    className="hover:opacity-80 transition-opacity"
+                  >
+                    <StatusPill status={match.apply_status ?? "applied"} />
+                  </button>
+                ) : (
+                  <StatusPill status={match.apply_status ?? "applied"} />
+                )
+              ) : !coverLetter ? (
                 <button
-                  onClick={handleApply}
-                  disabled={applying}
+                  onClick={handleGenerate}
+                  disabled={generating}
                   className="text-xs bg-teal text-ink font-semibold px-3 py-1.5 rounded hover:bg-teal/90 disabled:opacity-50 transition-colors"
                 >
-                  {applying ? "Applying…" : "Apply"}
+                  {generating ? "Generating…" : "Generate cover letter"}
                 </button>
-              )}
+              ) : null}
             </div>
             {error && <div className="text-xs text-rose mt-2">{error}</div>}
+
+            {!match.applied && coverLetter && (
+              <div className="mt-4 flex flex-col gap-3">
+                <div className="flex items-center justify-between">
+                  <div className="text-xs text-muted">Cover letter — copy and paste into the application</div>
+                  <button onClick={handleCopy} className="text-xs text-teal hover:underline">
+                    {copied ? "Copied ✓" : "Copy"}
+                  </button>
+                </div>
+                <pre className="text-sm text-text leading-relaxed whitespace-pre-wrap font-sans bg-panel border border-border rounded p-4">
+                  {coverLetter}
+                </pre>
+
+                <div className="flex items-center gap-2">
+                  {applyUrl && (
+                    <a
+                      href={applyUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs text-sky hover:underline flex-1 truncate"
+                    >
+                      Open application page →
+                    </a>
+                  )}
+                  <button
+                    onClick={handleMarkApplied}
+                    disabled={marking}
+                    className="text-xs bg-teal text-ink font-semibold px-3 py-1.5 rounded hover:bg-teal/90 disabled:opacity-50 transition-colors whitespace-nowrap"
+                  >
+                    {marking ? "Saving…" : "Mark as applied"}
+                  </button>
+                </div>
+              </div>
+            )}
           </section>
 
           {/* Claude reasoning */}

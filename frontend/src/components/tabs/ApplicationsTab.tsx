@@ -1,13 +1,24 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { updateAppStatus, type Application } from "../../lib/api";
 import { ScoreBadge, StatusPill } from "../ui";
 import { CoverDrawer } from "../CoverDrawer";
 
-export function ApplicationsTab({ apps, onRefresh }: { apps: Application[]; onRefresh: () => void }) {
+export function ApplicationsTab({ apps, onRefresh, focusedAppId, onFocusHandled }: {
+  apps: Application[]; onRefresh: () => void;
+  focusedAppId?: string | null; onFocusHandled?: () => void;
+}) {
   const [coverApp, setCoverApp] = useState<Application | null>(null);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const rowRefs = useRef<Record<string, HTMLTableRowElement | null>>({});
 
   const statusOrder = ["applied", "interview", "offer", "rejected", "ghosted", "failed"];
+
+  useEffect(() => {
+    if (!focusedAppId) return;
+    rowRefs.current[focusedAppId]?.scrollIntoView({ behavior: "smooth", block: "center" });
+    const timer = setTimeout(() => onFocusHandled?.(), 2000);
+    return () => clearTimeout(timer);
+  }, [focusedAppId, onFocusHandled]);
 
   async function handleStatus(app: Application, status: string) {
     setUpdatingId(app.id);
@@ -32,7 +43,13 @@ export function ApplicationsTab({ apps, onRefresh }: { apps: Application[]; onRe
           </thead>
           <tbody>
             {apps.map((app, i) => (
-              <tr key={i} className="border-b border-border/50 hover:bg-panel/30 transition-colors group">
+              <tr
+                key={i}
+                ref={el => { rowRefs.current[app.id] = el; }}
+                className={`border-b border-border/50 hover:bg-panel/30 transition-colors group ${
+                  focusedAppId === app.id ? "bg-teal/10" : ""
+                }`}
+              >
                 <td className="py-2.5 pr-4 text-text font-medium max-w-[180px] truncate">{app.job_title}</td>
                 <td className="py-2.5 pr-4 text-muted">{app.company}</td>
                 <td className="py-2.5 pr-4 text-xs text-muted">{app.resume_label}</td>

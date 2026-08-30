@@ -41,6 +41,8 @@ class Resume(Base):
     file_path   = Column(String(500))           # path to original file
     active      = Column(Boolean, default=True)
     created_at  = Column(DateTime, default=datetime.utcnow)
+    search_keywords   = Column(String(255))   # last derived job-search string, e.g. "senior backend engineer"
+    required_keywords = Column(ARRAY(Text), default=[])  # last derived required terms
 
     matches     = relationship("JobMatch", back_populates="resume")
     applications = relationship("AppliedJob", back_populates="resume")

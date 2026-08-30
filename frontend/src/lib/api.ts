@@ -12,6 +12,7 @@ async function req<T>(path: string, opts?: RequestInit): Promise<T> {
 // ── Resumes ────────────────────────────────────────────────
 export type Resume = {
   id: string; label: string; filename: string; created_at: string;
+  search_keywords: string | null; required_keywords: string[];
 };
 export const getResumes = () => req<Resume[]>("/resumes");
 export const deleteResume = (id: string) =>
@@ -29,6 +30,7 @@ export async function uploadResume(file: File, label: string): Promise<Resume> {
 export type Job = {
   id: string; title: string; company: string; source: string;
   location: string; remote: boolean; apply_url: string; fetched_at: string;
+  applied: boolean; application_id: string | null;
 };
 export const getJobs = (source?: string) =>
   req<Job[]>(`/jobs${source ? `?source=${source}` : ""}`);
@@ -38,12 +40,16 @@ export type Match = {
   job_id: string; resume_id: string; resume_label: string;
   job_title: string; company: string; score: number;
   reasoning: string; missing_skills: string[]; selling_points: string[];
-  applied: boolean; apply_status: string | null; reviewed_at: string;
+  applied: boolean; apply_status: string | null; application_id: string | null; reviewed_at: string;
 };
 export const getMatches = (minScore = 0) =>
   req<Match[]>(`/matches?min_score=${minScore}`);
 export const applyToMatch = (jobId: string, resumeId: string) =>
   req(`/matches/${jobId}/${resumeId}/apply`, { method: "POST" });
+export const generateCoverLetterForMatch = (jobId: string, resumeId: string) =>
+  req<{ cover_letter: string; apply_url: string }>(`/matches/${jobId}/${resumeId}/cover-letter`, { method: "POST" });
+export const markMatchApplied = (jobId: string, resumeId: string, coverLetter: string) =>
+  req(`/matches/${jobId}/${resumeId}/mark-applied?cover_letter=${encodeURIComponent(coverLetter)}`, { method: "POST" });
 
 // ── Applications ───────────────────────────────────────────
 export type Application = {
@@ -59,6 +65,7 @@ export const updateAppStatus = (id: string, status: string, notes?: string) =>
 export type Stats = {
   total_jobs: number; total_resumes: number; total_matches: number;
   total_applied: number; interviews: number; offers: number;
+  score_threshold: number;
 };
 export const getStats = () => req<Stats>("/stats");
 

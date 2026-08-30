@@ -2,7 +2,9 @@ import { useState } from "react";
 import { type Job } from "../../lib/api";
 import { SourceTag } from "../ui";
 
-export function JobsTab({ jobs }: { jobs: Job[] }) {
+export function JobsTab({ jobs, onViewApplication }: {
+  jobs: Job[]; onViewApplication: (applicationId: string) => void;
+}) {
   const [source, setSource] = useState<string>("all");
   const sources = ["all", ...Array.from(new Set(jobs.map(j => j.source)))];
   const filtered = source === "all" ? jobs : jobs.filter(j => j.source === source);
@@ -30,7 +32,7 @@ export function JobsTab({ jobs }: { jobs: Job[] }) {
         <table className="w-full text-sm border-collapse">
           <thead>
             <tr className="border-b border-border">
-              {["Role", "Company", "Location", "Source", "Fetched", ""].map(h => (
+              {["Role", "Company", "Location", "Source", "Fetched", "", ""].map(h => (
                 <th key={h} className="text-left text-xs text-muted font-normal pb-2 pr-4 whitespace-nowrap">{h}</th>
               ))}
             </tr>
@@ -45,6 +47,18 @@ export function JobsTab({ jobs }: { jobs: Job[] }) {
                 <td className="py-2.5 pr-4 text-xs text-muted whitespace-nowrap">
                   {new Date(j.fetched_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
                 </td>
+                <td className="py-2.5 pr-4">
+                  {j.applied && j.application_id ? (
+                    <button
+                      onClick={() => onViewApplication(j.application_id!)}
+                      className="text-xs text-teal hover:underline"
+                    >
+                      view application
+                    </button>
+                  ) : (
+                    <span className="text-xs text-muted">—</span>
+                  )}
+                </td>
                 <td className="py-2.5">
                   <a
                     href={j.apply_url}
@@ -53,13 +67,13 @@ export function JobsTab({ jobs }: { jobs: Job[] }) {
                     className="text-xs text-teal hover:underline"
                     onClick={e => e.stopPropagation()}
                   >
-                    view
+                    view listing
                   </a>
                 </td>
               </tr>
             ))}
             {filtered.length === 0 && (
-              <tr><td colSpan={6} className="py-12 text-center text-muted text-sm">No jobs fetched yet.</td></tr>
+              <tr><td colSpan={7} className="py-12 text-center text-muted text-sm">No jobs fetched yet.</td></tr>
             )}
           </tbody>
         </table>

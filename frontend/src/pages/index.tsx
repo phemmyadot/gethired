@@ -24,13 +24,21 @@ export default function Home() {
   const [pipelineRunning, setPipelineRunning] = useState(false);
   const [pipelineStatus, setPipelineStatus] = useState<PipelineStatus>(null);
   const [lastRun, setLastRun] = useState<string | null>(null);
+  const [focusedAppId, setFocusedAppId] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  function viewApplication(applicationId: string) {
+    setFocusedAppId(applicationId);
+    setTab("applications");
+  }
+
   const load = useCallback(async () => {
-    const [s, m, a, r, j] = await Promise.allSettled([
-      getStats(), getMatches(0.7), getApplications(), getResumes(), getJobs(),
+    const s = await getStats().catch(() => null);
+    if (s) setStats(s);
+
+    const [m, a, r, j] = await Promise.allSettled([
+      getMatches(s?.score_threshold ?? 0.7), getApplications(), getResumes(), getJobs(),
     ]);
-    if (s.status === "fulfilled") setStats(s.value);
     if (m.status === "fulfilled") setMatches(m.value);
     if (a.status === "fulfilled") setApps(a.value);
     if (r.status === "fulfilled") setResumes(r.value);
@@ -98,10 +106,10 @@ export default function Home() {
 
         <div className="flex-1 overflow-y-auto p-6">
           {tab === "dashboard"    && <DashboardTab stats={stats} />}
-          {tab === "matches"      && <MatchesTab matches={matches} onRefresh={load} />}
-          {tab === "applications" && <ApplicationsTab apps={apps} onRefresh={load} />}
+          {tab === "matches"      && <MatchesTab matches={matches} resumes={resumes} onRefresh={load} onViewApplication={viewApplication} />}
+          {tab === "applications" && <ApplicationsTab apps={apps} onRefresh={load} focusedAppId={focusedAppId} onFocusHandled={() => setFocusedAppId(null)} />}
           {tab === "resumes"      && <ResumesTab resumes={resumes} onRefresh={load} />}
-          {tab === "jobs"         && <JobsTab jobs={jobs} />}
+          {tab === "jobs"         && <JobsTab jobs={jobs} onViewApplication={viewApplication} />}
         </div>
       </main>
     </div>

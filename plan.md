@@ -57,11 +57,11 @@ never persisted or exposed via the API.
 
 ## Open questions before implementing
 - Ingestion progress: reuse `IngestionLog` with a status column, or a
-  separate lightweight table?
+  separate lightweight table? reuse
 - Score threshold: hardcode 0.7 on frontend call, or make it a documented
-  constant shared between backend `SCORE_THRESHOLD` and frontend?
+  constant shared between backend `SCORE_THRESHOLD` and frontend? SCORE_THRESHOLD
 - "Mark as applied" — full apply flow (cover letter + submission) or a
-  manual/lightweight status flip with no generation?
+  manual/lightweight status flip with no generation? apply button that generates a cover letter, user go to link to apply and copy cover letter from app to paste app application site. when they apply, they record apply in app
 - Jobs feed apply/status: needs match data joined in — is Jobs feed
   meant to only show jobs with an existing match, or all ingested jobs
-  regardless of match status?
+  regardless of match status? all ingested. matches will show only match >=70%
