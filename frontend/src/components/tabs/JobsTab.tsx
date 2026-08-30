@@ -11,6 +11,8 @@ function toCardData(j: Job): JobCardData {
     workMode: j.work_mode,
     applyUrl: j.apply_url,
     postedAt: j.posted_at ?? j.fetched_at,
+    score: j.score ?? undefined,
+    resumeLabel: j.resume_label ?? undefined,
     applied: j.applied,
     applyStatus: j.applied ? "applied" : null,
     applicationId: j.application_id,

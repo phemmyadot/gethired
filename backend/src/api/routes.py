@@ -113,6 +113,12 @@ def list_jobs(
     results = []
     for j in jobs:
         applied = db.query(AppliedJob).filter_by(job_id=j.id).first()
+        best_match = (
+            db.query(JobMatch)
+            .filter_by(job_id=j.id)
+            .order_by(desc(JobMatch.score))
+            .first()
+        )
         results.append({
             "id": str(j.id), "title": j.title, "company": j.company,
             "source": j.source, "location": j.location, "remote": j.remote,
@@ -120,6 +126,8 @@ def list_jobs(
             "apply_url": j.apply_url, "fetched_at": j.fetched_at, "posted_at": j.posted_at,
             "applied": applied is not None,
             "application_id": str(applied.id) if applied else None,
+            "score": round(best_match.score, 3) if best_match else None,
+            "resume_label": best_match.resume.label if best_match and best_match.resume else None,
         })
     return results
 

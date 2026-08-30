@@ -33,6 +33,7 @@ export type Job = {
   location: string; remote: boolean; work_mode: WorkMode; apply_url: string;
   fetched_at: string; posted_at: string | null;
   applied: boolean; application_id: string | null;
+  score: number | null; resume_label: string | null;
 };
 export const getJobs = (source?: string) =>
   req<Job[]>(`/jobs${source ? `?source=${source}` : ""}`);
