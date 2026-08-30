@@ -58,17 +58,17 @@ export function JobCard({ job, onClick, onViewApplication }: {
             <div className="text-xs text-muted truncate">{job.location || "Location unknown"}</div>
           </div>
         </div>
-        {job.score != null ? <ScoreBadge score={job.score} /> : <SourceTag source={job.source} />}
+        {job.score != null ? <ScoreBadge score={job.score} /> : <span className="text-xs text-muted">—</span>}
       </div>
 
       <div>
         <div className="font-display text-lg font-semibold text-ink leading-snug">{job.title}</div>
         <div className="flex items-center gap-2 mt-2 flex-wrap">
           <WorkModeTag mode={job.workMode} />
-          {job.score != null && <SourceTag source={job.source} />}
-          {job.resumeLabel && (
-            <span className="text-xs bg-panel text-ink/70 px-2.5 py-1 rounded-full">{job.resumeLabel}</span>
-          )}
+          <SourceTag source={job.source} />
+          <span className="text-xs bg-panel text-ink/70 px-2.5 py-1 rounded-full">
+            {job.resumeLabel ?? "Not matched"}
+          </span>
           <span className="text-xs text-muted">{timeAgo(job.postedAt)}</span>
         </div>
       </div>
