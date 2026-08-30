@@ -3,6 +3,7 @@ Auto-apply engine.
 Generates a custom cover letter per application via Claude,
 then attempts submission via Greenhouse/Lever APIs or Playwright form fill.
 """
+import json
 import logging
 import os
 from sqlalchemy.orm import Session
@@ -17,14 +18,53 @@ logger = logging.getLogger(__name__)
 # Cover letter generation
 # ─────────────────────────────────────────────
 
+HOOK_EXTRACTION_PROMPT = """Read this job posting and pull out concrete, specific details a candidate
+could reference in a cover letter to prove they actually read it — not generic paraphrases of the title.
+
+Look for: a named product/team, a specific technical challenge or stack detail, a stated company
+initiative or growth stage, a concrete responsibility unique to this posting (not boilerplate like
+"collaborate with cross-functional teams").
+
+ROLE: {title} at {company}
+JOB DESCRIPTION:
+{job_excerpt}
+
+Return ONLY valid JSON:
+{{
+  "opening_hook": "one sentence naming a specific, quotable detail from the posting above — no generic praise",
+  "first_90_days_focus": "one concrete thing from THIS posting's actual responsibilities to focus on first — not generic (bad: \\"improve CI/CD\\"; good: tied to a specific stated need in the posting)"
+}}"""
+
+
+def _extract_job_hooks(job: Job) -> dict:
+    """Pull concrete, job-specific details to ground the cover letter instead of generic paraphrase."""
+    default = {"opening_hook": "", "first_90_days_focus": ""}
+    try:
+        prompt = HOOK_EXTRACTION_PROMPT.format(
+            title=job.title, company=job.company, job_excerpt=job.description[:2000],
+        )
+        raw = generate_text(prompt)
+        hooks = json.loads(raw)
+        return {
+            "opening_hook": hooks.get("opening_hook") or default["opening_hook"],
+            "first_90_days_focus": hooks.get("first_90_days_focus") or default["first_90_days_focus"],
+        }
+    except Exception as e:
+        logger.error(f"Job hook extraction failed: {e}")
+        return default
+
+
 COVER_LETTER_PROMPT = """Write a concise, genuine cover letter for this job application.
 
 Rules:
 - 3 short paragraphs only
-- Never use hollow phrases: "passionate", "excited to apply", "perfect fit"
-- Open with a specific insight about the company or role, not about yourself
+- Never use hollow phrases: "passionate", "excited to apply", "perfect fit", "stands out due to",
+  "aligning perfectly with", or any variant that paraphrases the job title back at the reader
+- Open by referencing this SPECIFIC detail from the posting (quote or closely paraphrase it) — do not
+  open with a generic statement about the role matching your skills: {opening_hook}
 - Middle paragraph: 2–3 concrete achievements from the resume that directly address the role
-- Close: one sentence on what you'd focus on in the first 90 days
+- Close with one sentence on this specific first-90-days focus (make it concrete, not boilerplate
+  like "improve the CI/CD pipeline" unless the posting actually calls for that): {first_90_days_focus}
 - Tone: confident, direct, human — not corporate
 
 CANDIDATE'S SELLING POINTS FOR THIS ROLE:
@@ -45,13 +85,16 @@ def generate_cover_letter(
     job: Job,
     selling_points: list[str],
 ) -> str:
-    """Generate a tailored cover letter via Claude."""
+    """Generate a tailored cover letter via Claude, grounded in specifics pulled from the posting."""
+    hooks = _extract_job_hooks(job)
     prompt = COVER_LETTER_PROMPT.format(
         selling_points="\n".join(f"• {p}" for p in selling_points),
         resume_excerpt=resume.content[:2000],
         title=job.title,
         company=job.company,
         job_excerpt=job.description[:1500],
+        opening_hook=hooks["opening_hook"] or "(none found — open with your strongest relevant achievement instead)",
+        first_90_days_focus=hooks["first_90_days_focus"] or "(none found — pick the most relevant listed responsibility)",
     )
     try:
         return generate_text(prompt)
