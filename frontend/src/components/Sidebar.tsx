@@ -1,17 +1,29 @@
 import { NavItem } from "./ui";
+import { type PipelineStatus } from "../lib/api";
 
 export type Tab = "dashboard" | "matches" | "applications" | "resumes" | "jobs";
 
 type NavItemDef = { id: Tab; icon: string; label: string; badge?: number };
 
-export function Sidebar({ tab, onTabChange, navItems, pipelineRunning, onRunPipeline, lastRun }: {
+const STAGE_LABELS: Record<string, string> = {
+  running:   "Starting…",
+  ingesting: "Fetching jobs…",
+  matching:  "Scoring matches…",
+  applying:  "Applying…",
+  done:      "Done",
+  failed:    "Failed",
+};
+
+export function Sidebar({ tab, onTabChange, navItems, pipelineRunning, onRunPipeline, lastRun, pipelineStatus }: {
   tab: Tab;
   onTabChange: (t: Tab) => void;
   navItems: NavItemDef[];
   pipelineRunning: boolean;
   onRunPipeline: () => void;
   lastRun: string | null;
+  pipelineStatus: PipelineStatus;
 }) {
+  const inProgress = pipelineStatus && ["running", "ingesting", "matching", "applying"].includes(pipelineStatus.status);
   return (
     <aside className="w-52 shrink-0 bg-surface border-r border-border flex flex-col">
       {/* Logo */}
@@ -41,11 +53,31 @@ export function Sidebar({ tab, onTabChange, navItems, pipelineRunning, onRunPipe
       <div className="p-4 border-t border-border flex flex-col gap-2">
         <button
           onClick={onRunPipeline}
-          disabled={pipelineRunning}
+          disabled={pipelineRunning || !!inProgress}
           className="w-full text-xs font-semibold py-2 rounded bg-teal text-ink hover:bg-teal/90 disabled:opacity-50 transition-colors"
         >
-          {pipelineRunning ? "Running…" : "▶ Run pipeline"}
+          {pipelineRunning || inProgress ? "Running…" : "▶ Run pipeline"}
         </button>
+
+        {inProgress && pipelineStatus && (
+          <div className="text-xs text-muted flex flex-col gap-0.5">
+            <div className="flex items-center gap-1.5 text-teal">
+              <span className="inline-block w-1.5 h-1.5 rounded-full bg-teal animate-pulse" />
+              {STAGE_LABELS[pipelineStatus.status] ?? pipelineStatus.status}
+            </div>
+            {pipelineStatus.jobs_found > 0 && (
+              <div>{pipelineStatus.jobs_new} new / {pipelineStatus.jobs_found} found</div>
+            )}
+            {pipelineStatus.matches_found > 0 && (
+              <div>{pipelineStatus.matches_found} matches</div>
+            )}
+          </div>
+        )}
+
+        {!inProgress && pipelineStatus?.status === "failed" && (
+          <div className="text-xs text-rose">{pipelineStatus.error ?? "Pipeline failed"}</div>
+        )}
+
         {lastRun && <div className="text-xs text-muted text-center">Last run {lastRun}</div>}
       </div>
     </aside>

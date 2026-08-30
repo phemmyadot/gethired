@@ -65,3 +65,10 @@ export const getStats = () => req<Stats>("/stats");
 // ── Pipeline ───────────────────────────────────────────────
 export const triggerPipeline = () =>
   req("/pipeline/run", { method: "POST" });
+
+export type PipelineStatus = {
+  status: "running" | "ingesting" | "matching" | "applying" | "done" | "failed";
+  jobs_found: number; jobs_new: number; jobs_duped: number;
+  matches_found: number; error: string | null; ran_at: string;
+} | null;
+export const getPipelineStatus = () => req<PipelineStatus>("/pipeline/status");

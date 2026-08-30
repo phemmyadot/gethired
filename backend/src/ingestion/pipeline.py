@@ -108,10 +108,11 @@ def save_job(job_dict: dict, db: Session) -> tuple[Job | None, bool]:
 # Main ingestion entry point
 # ─────────────────────────────────────────────
 
-def run_ingestion(db: Session, prefs: dict = None, sources: list[str] = None) -> list[Job]:
+def run_ingestion(db: Session, prefs: dict = None, sources: list[str] = None, log: IngestionLog = None) -> list[Job]:
     """
     Fetch from all sources, pre-filter, dedup, save.
     Returns list of newly inserted Job objects ready for matching.
+    If `log` is given, updates that row's counts instead of creating a new one.
     """
     sources = sources or _default_sources()
     all_raw: list[dict] = []
@@ -153,14 +154,15 @@ def run_ingestion(db: Session, prefs: dict = None, sources: list[str] = None) ->
     logger.info(f"Saved {len(new_jobs)} new jobs, {duped} duplicates skipped in {duration}s")
 
     # 4. Log run
-    log = IngestionLog(
-        source=",".join(sources),
-        jobs_found=len(all_raw),
-        jobs_new=len(new_jobs),
-        jobs_duped=duped,
-        duration_s=duration,
-    )
-    db.add(log)
+    if log is None:
+        log = IngestionLog(source=",".join(sources))
+        db.add(log)
+    else:
+        log.source = ",".join(sources)
+    log.jobs_found = len(all_raw)
+    log.jobs_new = len(new_jobs)
+    log.jobs_duped = duped
+    log.duration_s = duration
     db.commit()
 
     return new_jobs

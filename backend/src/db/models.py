@@ -118,9 +118,11 @@ class IngestionLog(Base):
 
     id          = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     source      = Column(String(50))
+    status      = Column(String(20), default="running")  # running|ingesting|matching|applying|done|failed
     jobs_found  = Column(Float, default=0)
     jobs_new    = Column(Float, default=0)
     jobs_duped  = Column(Float, default=0)
+    matches_found = Column(Float, default=0)
     error       = Column(Text)
     ran_at      = Column(DateTime, default=datetime.utcnow)
     duration_s  = Column(Float)

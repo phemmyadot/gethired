@@ -228,12 +228,34 @@ def trigger_pipeline(
     return {"message": "Pipeline started in background"}
 
 
+@app.get("/pipeline/status")
+def pipeline_status(db: Session = Depends(get_db)):
+    """Latest pipeline run's stage and counts, for progress display."""
+    log = db.query(IngestionLog).order_by(desc(IngestionLog.ran_at)).first()
+    if not log:
+        return None
+    return {
+        "status":        log.status,
+        "jobs_found":    log.jobs_found,
+        "jobs_new":      log.jobs_new,
+        "jobs_duped":    log.jobs_duped,
+        "matches_found": log.matches_found,
+        "error":         log.error,
+        "ran_at":        log.ran_at,
+    }
+
+
 def _run_full_pipeline():
     """Full pipeline: ingest → match → apply."""
     db = get_session()
+    log = IngestionLog(status="running")
+    db.add(log)
+    db.commit()
     try:
         resumes = db.query(Resume).filter_by(user_id=USER_ID, active=True).all()
         if not resumes:
+            log.status = "done"
+            db.commit()
             return
 
         latest_resume = max(resumes, key=lambda r: r.created_at)
@@ -243,13 +265,32 @@ def _run_full_pipeline():
             "required_keywords": profile["required_keywords"],
         }
 
-        new_jobs = run_ingestion(db, prefs=prefs)
+        log.status = "ingesting"
+        db.commit()
+        new_jobs = run_ingestion(db, prefs=prefs, log=log)
         if not new_jobs:
+            log.status = "done"
+            db.commit()
             return
 
+        log.status = "matching"
+        db.commit()
         candidates = process_jobs_for_matching(new_jobs, resumes, db)
+        log.matches_found = len(candidates)
+        db.commit()
+
         if candidates and AUTO_APPLY_ENABLED:
+            log.status = "applying"
+            db.commit()
             run_applications(candidates, db)
+
+        log.status = "done"
+        db.commit()
+    except Exception as e:
+        log.status = "failed"
+        log.error = str(e)
+        db.commit()
+        raise
     finally:
         db.close()
 
