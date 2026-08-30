@@ -76,7 +76,9 @@ export function MatchesTab({ matches, resumes, onRefresh, onViewApplication }: {
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="font-display text-lg font-semibold text-ink leading-snug truncate">{m.job_title}</div>
-                  <div className="text-sm text-muted mt-0.5">{m.company}</div>
+                  <div className="text-sm text-muted mt-0.5">
+                    {m.company}{m.location ? ` · ${m.location}` : ""}
+                  </div>
                 </div>
                 <ScoreBadge score={m.score} />
               </div>
@@ -84,11 +86,9 @@ export function MatchesTab({ matches, resumes, onRefresh, onViewApplication }: {
               <div className="flex items-center gap-2 flex-wrap">
                 <WorkModeTag mode={m.work_mode} />
                 <span className="text-xs bg-panel text-ink/70 px-2.5 py-1 rounded-full">{m.resume_label}</span>
-                {m.posted_at && (
-                  <span className="text-xs text-muted">
-                    {new Date(m.posted_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-                  </span>
-                )}
+                <span className="text-xs text-muted">
+                  {new Date(m.posted_at ?? m.reviewed_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                </span>
               </div>
 
               <div className="flex items-center justify-between gap-2 mt-auto pt-3 border-t border-border/60">

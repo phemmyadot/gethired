@@ -52,7 +52,7 @@ export function MatchDrawer({ match, onClose, onApplied, onViewApplication }: {
           <div className="min-w-0">
             <div className="font-display text-xl font-semibold text-ink leading-snug">{match.job_title}</div>
             <div className="text-sm text-muted flex items-center gap-2 mt-2 flex-wrap">
-              <span>{match.company}</span>
+              <span>{match.company}{match.location ? ` · ${match.location}` : ""}</span>
               <WorkModeTag mode={match.work_mode} />
               {match.apply_url && (
                 <a
