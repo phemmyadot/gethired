@@ -25,17 +25,25 @@ Return ONLY valid JSON in this exact shape:
 relevant job posting for this person would almost always mention. Keep it short and precise."""
 
 
-def extract_profile(resume_content: str) -> dict:
-    """Derive search keywords and required keywords from a resume via the LLM."""
-    default = {"search_keywords": "software engineer", "required_keywords": []}
+def extract_profile(resume_content: str) -> dict | None:
+    """
+    Derive search keywords and required keywords from a resume via the LLM.
+    Returns None on failure — callers must not silently fall back to an
+    empty required_keywords list, since that disables pre_filter entirely.
+    """
     try:
         raw = generate_text(PROFILE_PROMPT.format(resume_content=resume_content[:4000]))
         profile = json.loads(raw)
     except Exception as e:
         logger.error(f"Profile extraction failed: {e}")
-        return default
+        return None
+
+    search_keywords = profile.get("search_keywords")
+    if not search_keywords:
+        logger.error("Profile extraction returned no search_keywords")
+        return None
 
     return {
-        "search_keywords": profile.get("search_keywords") or default["search_keywords"],
+        "search_keywords": search_keywords,
         "required_keywords": [k.lower() for k in profile.get("required_keywords", [])],
     }

@@ -1,6 +1,7 @@
 """
 FastAPI routes: resumes, jobs, matches, applications, pipeline trigger.
 """
+import logging
 import os
 import shutil
 from uuid import UUID
@@ -15,6 +16,8 @@ from ..ingestion.pipeline import run_ingestion
 from ..matching.engine import process_jobs_for_matching, SCORE_THRESHOLD
 from ..matching.profile import extract_profile
 from ..applying.applicator import run_applications, generate_cover_letter
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="JobBot API", version="1.0.0")
 
@@ -313,13 +316,28 @@ def _run_full_pipeline():
 
         latest_resume = max(resumes, key=lambda r: r.created_at)
         profile = extract_profile(latest_resume.content)
+
+        if profile is None:
+            # Extraction failed — reuse this resume's last successfully saved
+            # profile rather than falling back to empty required_keywords,
+            # which would disable pre_filter and let every job through.
+            logger.warning(
+                f"Profile extraction failed for resume {latest_resume.id}; "
+                f"reusing previously saved search profile."
+            )
+            profile = {
+                "search_keywords": latest_resume.search_keywords or "software engineer",
+                "required_keywords": latest_resume.required_keywords or [],
+            }
+        else:
+            latest_resume.search_keywords = profile["search_keywords"]
+            latest_resume.required_keywords = profile["required_keywords"]
+            db.commit()
+
         prefs = {
             "keywords": profile["search_keywords"],
             "required_keywords": profile["required_keywords"],
         }
-        latest_resume.search_keywords = profile["search_keywords"]
-        latest_resume.required_keywords = profile["required_keywords"]
-        db.commit()
 
         log.status = "ingesting"
         db.commit()
