@@ -118,6 +118,26 @@ def save_job(job_dict: dict, db: Session) -> tuple[Job | None, bool]:
 # Main ingestion entry point
 # ─────────────────────────────────────────────
 
+SENIORITY_PREFIXES = ["senior", "sr", "sr.", "lead", "staff", "principal"]
+
+def _keyword_variants(keywords: str) -> list[str]:
+    """
+    If keywords lead with a seniority word (e.g. "senior software engineer"),
+    also search the title without it ("software engineer") — many postings for
+    the same level of role omit the seniority prefix entirely.
+    """
+    keywords = keywords.strip()
+    if not keywords:
+        return [keywords]
+
+    words = keywords.split()
+    if words[0].lower() not in SENIORITY_PREFIXES:
+        return [keywords]
+
+    stripped = " ".join(words[1:]).strip()
+    return [keywords, stripped] if stripped else [keywords]
+
+
 def run_ingestion(db: Session, prefs: dict = None, sources: list[str] = None, log: IngestionLog = None) -> list[Job]:
     """
     Fetch from all sources, pre-filter, dedup, save.
@@ -126,27 +146,24 @@ def run_ingestion(db: Session, prefs: dict = None, sources: list[str] = None, lo
     """
     sources = sources or _default_sources()
     all_raw: list[dict] = []
+    keyword_variants = _keyword_variants((prefs or {}).get("keywords", "software engineer"))
 
-    # 1. Fetch
-    if "adzuna" in sources:
-        keywords = (prefs or {}).get("keywords", "software engineer")
-        all_raw.extend(fetch_adzuna(keywords=keywords))
+    # 1. Fetch — search each keyword variant (e.g. with and without "senior")
+    for keywords in keyword_variants:
+        if "adzuna" in sources:
+            all_raw.extend(fetch_adzuna(keywords=keywords))
 
-    if "remotive" in sources:
-        search = (prefs or {}).get("keywords", "")
-        all_raw.extend(fetch_remotive(search=search))
+        if "remotive" in sources:
+            all_raw.extend(fetch_remotive(search=keywords))
 
-    if "remoteok" in sources:
-        search = (prefs or {}).get("keywords", "")
-        all_raw.extend(fetch_remoteok(search=search))
+        if "remoteok" in sources:
+            all_raw.extend(fetch_remoteok(search=keywords))
 
-    if "jobicy" in sources:
-        search = (prefs or {}).get("keywords", "")
-        all_raw.extend(fetch_jobicy(search=search))
+        if "jobicy" in sources:
+            all_raw.extend(fetch_jobicy(search=keywords))
 
-    if "arbeitnow" in sources:
-        search = (prefs or {}).get("keywords", "")
-        all_raw.extend(fetch_arbeitnow(search=search))
+        if "arbeitnow" in sources:
+            all_raw.extend(fetch_arbeitnow(search=keywords))
 
     if "greenhouse" in sources:
         all_raw.extend(fetch_greenhouse_all())
