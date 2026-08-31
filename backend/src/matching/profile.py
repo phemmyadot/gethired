@@ -25,25 +25,27 @@ Return ONLY valid JSON in this exact shape:
 relevant job posting for this person would almost always mention. Keep it short and precise."""
 
 
-def extract_profile(resume_content: str) -> dict | None:
+def extract_profile(resume_content: str, retries: int = 3) -> dict | None:
     """
     Derive search keywords and required keywords from a resume via the LLM.
-    Returns None on failure — callers must not silently fall back to an
-    empty required_keywords list, since that disables pre_filter entirely.
+    Retries on failure since callers must not silently fall back to an
+    empty required_keywords list — that disables pre_filter entirely.
+    Returns None only if every attempt fails.
     """
-    try:
-        raw = generate_text(PROFILE_PROMPT.format(resume_content=resume_content[:4000]))
-        profile = json.loads(raw)
-    except Exception as e:
-        logger.error(f"Profile extraction failed: {e}")
-        return None
+    for attempt in range(1, retries + 1):
+        try:
+            raw = generate_text(PROFILE_PROMPT.format(resume_content=resume_content[:4000]))
+            profile = json.loads(raw)
+            search_keywords = profile.get("search_keywords")
+            if not search_keywords:
+                raise ValueError("no search_keywords in response")
 
-    search_keywords = profile.get("search_keywords")
-    if not search_keywords:
-        logger.error("Profile extraction returned no search_keywords")
-        return None
+            return {
+                "search_keywords": search_keywords,
+                "required_keywords": [k.lower() for k in profile.get("required_keywords", [])],
+            }
+        except Exception as e:
+            logger.warning(f"Profile extraction attempt {attempt}/{retries} failed: {e}")
 
-    return {
-        "search_keywords": search_keywords,
-        "required_keywords": [k.lower() for k in profile.get("required_keywords", [])],
-    }
+    logger.error(f"Profile extraction failed after {retries} attempts")
+    return None
