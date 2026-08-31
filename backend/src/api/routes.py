@@ -378,13 +378,9 @@ def trigger_pipeline(
     return {"message": "Pipeline started in background"}
 
 
-@app.get("/pipeline/status")
-def pipeline_status(db: Session = Depends(get_db)):
-    """Latest pipeline run's stage and counts, for progress display."""
-    log = db.query(IngestionLog).order_by(desc(IngestionLog.ran_at)).first()
-    if not log:
-        return None
+def _serialize_log(log: IngestionLog) -> dict:
     return {
+        "id":            str(log.id),
         "status":        log.status,
         "jobs_found":    log.jobs_found,
         "jobs_new":      log.jobs_new,
@@ -393,6 +389,28 @@ def pipeline_status(db: Session = Depends(get_db)):
         "error":         log.error,
         "ran_at":        log.ran_at,
     }
+
+
+@app.get("/pipeline/status")
+def pipeline_status(db: Session = Depends(get_db)):
+    """Latest pipeline run's stage and counts, for progress display."""
+    log = db.query(IngestionLog).order_by(desc(IngestionLog.ran_at)).first()
+    if not log:
+        return None
+    return _serialize_log(log)
+
+
+@app.get("/pipeline/status/{log_id}")
+def pipeline_status_by_id(log_id: UUID, db: Session = Depends(get_db)):
+    """
+    Status of one specific run, identified by the log_id returned when it was
+    triggered. Use this to track a run you started without it being clobbered
+    by unrelated concurrent runs (e.g. the scheduler's periodic ingestion).
+    """
+    log = db.query(IngestionLog).filter_by(id=log_id).first()
+    if not log:
+        raise HTTPException(404, "Run not found")
+    return _serialize_log(log)
 
 
 def _run_full_pipeline():

@@ -2,7 +2,7 @@
 import Head from "next/head";
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
-  getStats, getMatches, getApplications, getResumes, triggerPipeline, getPipelineStatus, matchAllJobs,
+  getStats, getMatches, getApplications, getResumes, triggerPipeline, getPipelineStatus, getRunStatus, matchAllJobs,
   type Stats, type Match, type Application, type Resume, type PipelineStatus,
 } from "../lib/api";
 import { Sidebar, type Tab } from "../components/Sidebar";
@@ -54,10 +54,10 @@ export default function Home() {
     }
   }, []);
 
-  const pollStatus = useCallback((onDone: () => void) => {
+  const pollStatus = useCallback((fetchStatus: () => Promise<PipelineStatus>, onDone: () => void) => {
     stopPolling();
     pollRef.current = setInterval(async () => {
-      const status = await getPipelineStatus().catch(() => null);
+      const status = await fetchStatus().catch(() => null);
       setPipelineStatus(status);
       if (!status || !IN_PROGRESS_STATUSES.includes(status.status)) {
         stopPolling();
@@ -73,7 +73,7 @@ export default function Home() {
     setPipelineRunning(true);
     try {
       await triggerPipeline();
-      pollStatus(load);
+      pollStatus(getPipelineStatus, load);
     } finally {
       setPipelineRunning(false);
     }
@@ -82,8 +82,8 @@ export default function Home() {
   async function handleMatchAll() {
     setPipelineRunning(true);
     try {
-      await matchAllJobs();
-      pollStatus(() => { load(); setJobsVersion(v => v + 1); });
+      const { log_id } = await matchAllJobs();
+      pollStatus(() => getRunStatus(log_id), () => { load(); setJobsVersion(v => v + 1); });
     } finally {
       setPipelineRunning(false);
     }
