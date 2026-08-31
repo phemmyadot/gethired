@@ -48,6 +48,8 @@ export const getJobs = (opts?: { source?: string; limit?: number; offset?: numbe
 };
 export const matchAllJobs = (source?: string) =>
   req<{ message: string; log_id: string }>(`/jobs/match-all${source ? `?source=${source}` : ""}`, { method: "POST" });
+export const stopMatchAll = (logId: string) =>
+  req<{ message: string }>(`/jobs/match-all/${logId}/stop`, { method: "POST" });
 
 // ── Matches ────────────────────────────────────────────────
 export type Match = {
@@ -80,6 +82,7 @@ export const updateAppStatus = (id: string, status: string, notes?: string) =>
 // ── Stats ──────────────────────────────────────────────────
 export type Stats = {
   total_jobs: number; total_resumes: number; total_matches: number;
+  total_scored_jobs: number;
   total_applied: number; interviews: number; offers: number;
   score_threshold: number;
 };
@@ -91,7 +94,7 @@ export const triggerPipeline = () =>
 
 export type PipelineStatus = {
   id: string;
-  status: "running" | "ingesting" | "matching" | "applying" | "done" | "failed";
+  status: "running" | "ingesting" | "matching" | "applying" | "stopping" | "stopped" | "done" | "failed";
   jobs_found: number; jobs_new: number; jobs_duped: number;
   matches_found: number; error: string | null; ran_at: string;
 } | null;

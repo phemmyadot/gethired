@@ -181,6 +181,24 @@ def match_all_jobs(
     return {"message": "Matching started in background", "log_id": str(log_id)}
 
 
+@app.post("/jobs/match-all/{log_id}/stop")
+def stop_match_all(log_id: UUID, db: Session = Depends(get_db)):
+    """
+    Request that an in-progress match-all run stop after its current job.
+    The remaining jobs stay unmatched and can be picked up by triggering
+    match-all again (only_unmatched=true skips whatever already got matched).
+    """
+    log = db.query(IngestionLog).filter_by(id=log_id).first()
+    if not log:
+        raise HTTPException(404, "Run not found")
+    if log.status not in ("running", "matching"):
+        raise HTTPException(409, f"Run is not active (status: {log.status})")
+
+    log.status = "stopping"
+    db.commit()
+    return {"message": "Stop requested — will halt after the current job"}
+
+
 def _run_match_all(log_id, source: str = None, only_unmatched: bool = True):
     db = get_session()
     try:
@@ -209,6 +227,15 @@ def _run_match_all(log_id, source: str = None, only_unmatched: bool = True):
         db.commit()
 
         for i, job in enumerate(jobs, start=1):
+            # Cooperative cancellation: check before each job whether this run
+            # was asked to stop (e.g. via POST /jobs/match-all/{log_id}/stop).
+            db.refresh(log)
+            if log.status == "stopping":
+                log.status = "stopped"
+                db.commit()
+                logger.info(f"Match run {log_id} stopped by request at {i - 1}/{len(jobs)}")
+                return
+
             try:
                 process_jobs_for_matching([job], resumes, db)
             except Exception as e:
@@ -496,6 +523,7 @@ def get_stats(db: Session = Depends(get_db)):
         "total_jobs":       db.query(Job).count(),
         "total_resumes":    db.query(Resume).filter_by(active=True).count(),
         "total_matches":    db.query(JobMatch).filter(JobMatch.score >= SCORE_THRESHOLD).count(),
+        "total_scored_jobs": db.query(JobMatch.job_id).distinct().count(),
         "total_applied":    db.query(AppliedJob).filter_by(status="applied").count(),
         "interviews":       db.query(AppliedJob).filter_by(status="interview").count(),
         "offers":           db.query(AppliedJob).filter_by(status="offer").count(),
@@ -511,3 +539,21 @@ def get_stats(db: Session = Depends(get_db)):
 @app.on_event("startup")
 def startup():
     Base.metadata.create_all(get_engine())
+
+    # Background tasks (pipeline runs, match-all) don't survive a process
+    # restart — any log left in an active state is orphaned, not actually
+    # running. Mark them failed so the UI doesn't show a stuck "in progress"
+    # run forever after a redeploy/restart.
+    db = get_session()
+    try:
+        orphaned = db.query(IngestionLog).filter(
+            IngestionLog.status.in_(["running", "ingesting", "matching", "applying", "stopping"])
+        ).all()
+        for log in orphaned:
+            log.status = "failed"
+            log.error = "Orphaned by API restart"
+        if orphaned:
+            db.commit()
+            logger.info(f"Marked {len(orphaned)} orphaned run(s) as failed on startup")
+    finally:
+        db.close()

@@ -23,12 +23,15 @@ function toCardData(j: Job): JobCardData {
   };
 }
 
-export function JobsTab({ onViewApplication, onMatchAll, matching, matchProgress, reloadKey }: {
+export function JobsTab({ onViewApplication, onMatchAll, onStopMatchAll, matching, canStop, matchProgress, reloadKey, totalScoredJobs }: {
   onViewApplication: (applicationId: string) => void;
   onMatchAll: () => void;
+  onStopMatchAll: () => void;
   matching: boolean;
+  canStop: boolean;
   matchProgress: PipelineStatus;
   reloadKey: number;
+  totalScoredJobs: number;
 }) {
   const [source, setSource] = useState<string>("all");
   const [sort, setSort] = useState<"fetched" | "score">("fetched");
@@ -92,6 +95,10 @@ export function JobsTab({ onViewApplication, onMatchAll, matching, matchProgress
           {matching ? "Matching…" : "Match unmatched"}
         </button>
 
+        <span className="text-xs text-muted whitespace-nowrap">
+          {totalScoredJobs} matched total
+        </span>
+
         <div className="ml-auto flex items-center gap-3">
           <div className="flex items-center gap-1 bg-panel rounded-full p-1">
             {(["fetched", "score"] as const).map(s => (
@@ -117,7 +124,9 @@ export function JobsTab({ onViewApplication, onMatchAll, matching, matchProgress
           <span className="inline-block w-2 h-2 rounded-full bg-accent animate-pulse shrink-0" />
           <div className="flex-1">
             <div className="flex items-center justify-between text-sm text-ink mb-1.5">
-              <span>Matching jobs against your resume…</span>
+              <span>
+                {matchProgress?.status === "stopping" ? "Stopping…" : "Matching jobs against your resume…"}
+              </span>
               <span className="font-mono text-accent font-semibold">
                 {matchProgress?.matches_found ?? 0} / {matchProgress?.jobs_found ?? 0}
               </span>
@@ -135,6 +144,15 @@ export function JobsTab({ onViewApplication, onMatchAll, matching, matchProgress
               />
             </div>
           </div>
+          {canStop && (
+            <button
+              onClick={onStopMatchAll}
+              disabled={matchProgress?.status === "stopping"}
+              className="text-xs font-semibold px-3.5 py-1.5 rounded-full bg-rose text-white hover:bg-rose/90 disabled:opacity-50 transition-colors whitespace-nowrap shrink-0"
+            >
+              {matchProgress?.status === "stopping" ? "Stopping…" : "Stop"}
+            </button>
+          )}
         </div>
       )}
 

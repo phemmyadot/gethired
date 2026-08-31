@@ -2,7 +2,7 @@
 import Head from "next/head";
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
-  getStats, getMatches, getApplications, getResumes, triggerPipeline, getPipelineStatus, getRunStatus, matchAllJobs,
+  getStats, getMatches, getApplications, getResumes, triggerPipeline, getPipelineStatus, getRunStatus, matchAllJobs, stopMatchAll,
   type Stats, type Match, type Application, type Resume, type PipelineStatus,
 } from "../lib/api";
 import { Sidebar, type Tab } from "../components/Sidebar";
@@ -13,7 +13,7 @@ import { ApplicationsTab } from "../components/tabs/ApplicationsTab";
 import { ResumesTab } from "../components/tabs/ResumesTab";
 import { JobsTab } from "../components/tabs/JobsTab";
 
-const IN_PROGRESS_STATUSES = ["running", "ingesting", "matching", "applying"];
+const IN_PROGRESS_STATUSES = ["running", "ingesting", "matching", "applying", "stopping"];
 
 export default function Home() {
   const [tab, setTab] = useState<Tab>("dashboard");
@@ -26,6 +26,7 @@ export default function Home() {
   const [lastRun, setLastRun] = useState<string | null>(null);
   const [focusedAppId, setFocusedAppId] = useState<string | null>(null);
   const [jobsVersion, setJobsVersion] = useState(0);
+  const [matchAllLogId, setMatchAllLogId] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   function viewApplication(applicationId: string) {
@@ -133,9 +134,23 @@ export default function Home() {
     setPipelineRunning(true);
     try {
       const { log_id } = await matchAllJobs();
-      pollStatus(() => getRunStatus(log_id), () => { load(); setJobsVersion(v => v + 1); });
+      setMatchAllLogId(log_id);
+      pollStatus(() => getRunStatus(log_id), () => {
+        load();
+        setJobsVersion(v => v + 1);
+        setMatchAllLogId(null);
+      });
     } finally {
       setPipelineRunning(false);
+    }
+  }
+
+  async function handleStopMatchAll() {
+    if (!matchAllLogId) return;
+    try {
+      await stopMatchAll(matchAllLogId);
+    } catch {
+      // ignore — polling will reflect whatever the backend ends up reporting
     }
   }
 
@@ -176,9 +191,12 @@ export default function Home() {
             <JobsTab
               onViewApplication={viewApplication}
               onMatchAll={handleMatchAll}
+              onStopMatchAll={handleStopMatchAll}
               matching={pipelineRunning || (pipelineStatus != null && IN_PROGRESS_STATUSES.includes(pipelineStatus.status))}
+              canStop={matchAllLogId != null && pipelineStatus?.status === "matching"}
               matchProgress={pipelineStatus}
               reloadKey={jobsVersion}
+              totalScoredJobs={stats?.total_scored_jobs ?? 0}
             />
           )}
         </div>
