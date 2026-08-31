@@ -69,6 +69,19 @@ export default function Home() {
 
   useEffect(() => () => stopPolling(), [stopPolling]);
 
+  // On mount (including a page refresh), check whether a run is already in
+  // progress on the backend and resume polling it instead of leaving the UI
+  // unaware — otherwise a refresh mid-run would let the user start a
+  // duplicate run.
+  useEffect(() => {
+    getPipelineStatus().then(status => {
+      if (status && IN_PROGRESS_STATUSES.includes(status.status)) {
+        setPipelineStatus(status);
+        pollStatus(() => getRunStatus(status.id), () => { load(); setJobsVersion(v => v + 1); });
+      }
+    }).catch(() => {});
+  }, [pollStatus, load]);
+
   async function handlePipeline() {
     setPipelineRunning(true);
     try {
