@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { getJobs, matchJob, type Job } from "../../lib/api";
+import { getJobs, type Job, type PipelineStatus } from "../../lib/api";
 import { JobCard, type JobCardData } from "../JobCard";
 
 const PAGE_SIZE = 48;
@@ -23,8 +23,12 @@ function toCardData(j: Job): JobCardData {
   };
 }
 
-export function JobsTab({ onViewApplication }: {
+export function JobsTab({ onViewApplication, onMatchAll, matching, matchProgress, reloadKey }: {
   onViewApplication: (applicationId: string) => void;
+  onMatchAll: () => void;
+  matching: boolean;
+  matchProgress: PipelineStatus;
+  reloadKey: number;
 }) {
   const [source, setSource] = useState<string>("all");
   const [sort, setSort] = useState<"fetched" | "score">("fetched");
@@ -32,7 +36,6 @@ export function JobsTab({ onViewApplication }: {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [matchingId, setMatchingId] = useState<string | null>(null);
 
   const loadPage = useCallback(async (sourceFilter: string, sortBy: "fetched" | "score", offset: number) => {
     return getJobs({
@@ -48,7 +51,7 @@ export function JobsTab({ onViewApplication }: {
     loadPage(source, sort, 0)
       .then(page => { setJobs(page.items); setTotal(page.total); })
       .finally(() => setLoading(false));
-  }, [source, sort, loadPage]);
+  }, [source, sort, loadPage, reloadKey]);
 
   async function handleLoadMore() {
     setLoadingMore(true);
@@ -58,20 +61,6 @@ export function JobsTab({ onViewApplication }: {
       setTotal(page.total);
     } finally {
       setLoadingMore(false);
-    }
-  }
-
-  async function handleMatchNow(jobId: string) {
-    setMatchingId(jobId);
-    try {
-      const result = await matchJob(jobId);
-      setJobs(prev => prev.map(j =>
-        j.id === jobId ? { ...j, score: result.score, resume_label: result.resume_label } : j
-      ));
-    } catch (e) {
-      // leave the card as-is; user can retry
-    } finally {
-      setMatchingId(null);
     }
   }
 
@@ -94,6 +83,16 @@ export function JobsTab({ onViewApplication }: {
             {s}
           </button>
         ))}
+
+        <button
+          onClick={onMatchAll}
+          disabled={matching}
+          className="text-xs font-semibold px-3.5 py-1.5 rounded-full bg-accent text-white hover:bg-accent/90 disabled:opacity-50 transition-colors whitespace-nowrap"
+        >
+          {matching
+            ? `Matching… ${matchProgress?.matches_found ?? 0}/${matchProgress?.jobs_found ?? 0}`
+            : "Match / rematch all"}
+        </button>
 
         <div className="ml-auto flex items-center gap-3">
           <div className="flex items-center gap-1 bg-panel rounded-full p-1">
@@ -125,13 +124,7 @@ export function JobsTab({ onViewApplication }: {
         <>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-5">
             {jobs.map((j, i) => (
-              <JobCard
-                key={i}
-                job={toCardData(j)}
-                onViewApplication={onViewApplication}
-                onMatchNow={handleMatchNow}
-                matching={matchingId === j.id}
-              />
+              <JobCard key={i} job={toCardData(j)} onViewApplication={onViewApplication} />
             ))}
           </div>
 

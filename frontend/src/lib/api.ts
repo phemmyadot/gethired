@@ -45,8 +45,8 @@ export const getJobs = (opts?: { source?: string; limit?: number; offset?: numbe
   const qs = params.toString();
   return req<JobsPage>(`/jobs${qs ? `?${qs}` : ""}`);
 };
-export const matchJob = (jobId: string) =>
-  req<{ score: number | null; resume_label: string | null }>(`/jobs/${jobId}/match`, { method: "POST" });
+export const matchAllJobs = (source?: string) =>
+  req<{ message: string; log_id: string }>(`/jobs/match-all${source ? `?source=${source}` : ""}`, { method: "POST" });
 
 // ── Matches ────────────────────────────────────────────────
 export type Match = {

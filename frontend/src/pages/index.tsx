@@ -2,7 +2,7 @@
 import Head from "next/head";
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
-  getStats, getMatches, getApplications, getResumes, triggerPipeline, getPipelineStatus,
+  getStats, getMatches, getApplications, getResumes, triggerPipeline, getPipelineStatus, matchAllJobs,
   type Stats, type Match, type Application, type Resume, type PipelineStatus,
 } from "../lib/api";
 import { Sidebar, type Tab } from "../components/Sidebar";
@@ -25,6 +25,7 @@ export default function Home() {
   const [pipelineStatus, setPipelineStatus] = useState<PipelineStatus>(null);
   const [lastRun, setLastRun] = useState<string | null>(null);
   const [focusedAppId, setFocusedAppId] = useState<string | null>(null);
+  const [jobsVersion, setJobsVersion] = useState(0);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   function viewApplication(applicationId: string) {
@@ -53,7 +54,7 @@ export default function Home() {
     }
   }, []);
 
-  const pollStatus = useCallback(() => {
+  const pollStatus = useCallback((onDone: () => void) => {
     stopPolling();
     pollRef.current = setInterval(async () => {
       const status = await getPipelineStatus().catch(() => null);
@@ -61,10 +62,10 @@ export default function Home() {
       if (!status || !IN_PROGRESS_STATUSES.includes(status.status)) {
         stopPolling();
         setLastRun(new Date().toLocaleTimeString());
-        load();
+        onDone();
       }
     }, 1500);
-  }, [load, stopPolling]);
+  }, [stopPolling]);
 
   useEffect(() => () => stopPolling(), [stopPolling]);
 
@@ -72,7 +73,17 @@ export default function Home() {
     setPipelineRunning(true);
     try {
       await triggerPipeline();
-      pollStatus();
+      pollStatus(load);
+    } finally {
+      setPipelineRunning(false);
+    }
+  }
+
+  async function handleMatchAll() {
+    setPipelineRunning(true);
+    try {
+      await matchAllJobs();
+      pollStatus(() => { load(); setJobsVersion(v => v + 1); });
     } finally {
       setPipelineRunning(false);
     }
@@ -111,7 +122,15 @@ export default function Home() {
           {tab === "matches"      && <MatchesTab matches={matches} resumes={resumes} onRefresh={load} onViewApplication={viewApplication} />}
           {tab === "applications" && <ApplicationsTab apps={apps} onRefresh={load} focusedAppId={focusedAppId} onFocusHandled={() => setFocusedAppId(null)} />}
           {tab === "resumes"      && <ResumesTab resumes={resumes} onRefresh={load} />}
-          {tab === "jobs"         && <JobsTab onViewApplication={viewApplication} />}
+          {tab === "jobs"         && (
+            <JobsTab
+              onViewApplication={viewApplication}
+              onMatchAll={handleMatchAll}
+              matching={pipelineRunning || (pipelineStatus != null && IN_PROGRESS_STATUSES.includes(pipelineStatus.status))}
+              matchProgress={pipelineStatus}
+              reloadKey={jobsVersion}
+            />
+          )}
         </div>
       </main>
     </div>

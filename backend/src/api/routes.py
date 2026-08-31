@@ -156,29 +156,64 @@ def list_jobs(
     return {"items": results, "total": total}
 
 
-@app.post("/jobs/{job_id}/match")
-def match_job(job_id: UUID, db: Session = Depends(get_db)):
-    """(Re-)score a single job against all active resumes via the LLM."""
-    job = db.query(Job).filter_by(id=job_id).first()
-    if not job:
-        raise HTTPException(404, "Job not found")
-
+@app.post("/jobs/match-all")
+def match_all_jobs(
+    background_tasks: BackgroundTasks,
+    source: str = None,
+    db: Session = Depends(get_db),
+):
+    """(Re-)score every non-expired job (optionally filtered by source) against all active resumes."""
     resumes = db.query(Resume).filter_by(user_id=USER_ID, active=True).all()
     if not resumes:
         raise HTTPException(400, "No active resumes to match against")
 
-    process_jobs_for_matching([job], resumes, db)
+    log = IngestionLog(status="matching", source=source or "all")
+    db.add(log)
+    db.commit()
+    log_id = log.id
 
-    best_match = (
-        db.query(JobMatch)
-        .filter_by(job_id=job.id)
-        .order_by(desc(JobMatch.score))
-        .first()
-    )
-    return {
-        "score": round(best_match.score, 3) if best_match else None,
-        "resume_label": best_match.resume.label if best_match and best_match.resume else None,
-    }
+    background_tasks.add_task(_run_match_all, log_id, source)
+    return {"message": "Matching started in background", "log_id": str(log_id)}
+
+
+def _run_match_all(log_id, source: str = None):
+    db = get_session()
+    try:
+        log = db.query(IngestionLog).filter_by(id=log_id).first()
+        resumes = db.query(Resume).filter_by(user_id=USER_ID, active=True).all()
+        if not resumes:
+            log.status = "failed"
+            log.error = "No active resumes to match against"
+            db.commit()
+            return
+
+        q = db.query(Job).filter_by(expired=False)
+        if source:
+            q = q.filter_by(source=source)
+        jobs = q.all()
+
+        log.jobs_found = len(jobs)
+        db.commit()
+
+        matched = 0
+        for job in jobs:
+            try:
+                process_jobs_for_matching([job], resumes, db)
+                matched += 1
+                log.matches_found = matched
+                db.commit()
+            except Exception as e:
+                logger.error(f"Match failed for job {job.id}: {e}")
+
+        log.status = "done"
+        db.commit()
+    except Exception as e:
+        log.status = "failed"
+        log.error = str(e)
+        db.commit()
+        raise
+    finally:
+        db.close()
 
 
 # ─────────────────────────────────────────────

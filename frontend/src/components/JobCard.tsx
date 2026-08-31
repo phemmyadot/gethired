@@ -33,12 +33,10 @@ function shortDate(iso: string) {
   return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
-export function JobCard({ job, onClick, onViewApplication, onMatchNow, matching }: {
+export function JobCard({ job, onClick, onViewApplication }: {
   job: JobCardData;
   onClick?: () => void;
   onViewApplication: (applicationId: string) => void;
-  onMatchNow?: (jobId: string) => void;
-  matching?: boolean;
 }) {
   return (
     <div
@@ -55,19 +53,7 @@ export function JobCard({ job, onClick, onViewApplication, onMatchNow, matching 
             <div className="text-xs text-muted truncate">{job.location || "Location unknown"}</div>
           </div>
         </div>
-        {job.score != null ? (
-          <ScoreBadge score={job.score} />
-        ) : onMatchNow && job.id ? (
-          <button
-            onClick={e => { e.stopPropagation(); onMatchNow(job.id!); }}
-            disabled={matching}
-            className="text-xs font-semibold px-2.5 py-1 rounded-full bg-accent-soft text-accent hover:bg-accent hover:text-white disabled:opacity-50 transition-colors whitespace-nowrap"
-          >
-            {matching ? "Matching…" : "Match now"}
-          </button>
-        ) : (
-          <span className="text-xs text-muted">—</span>
-        )}
+        {job.score != null ? <ScoreBadge score={job.score} /> : <span className="text-xs text-muted">—</span>}
       </div>
 
       <div>
