@@ -5,7 +5,7 @@ import logging
 import os
 import shutil
 from uuid import UUID
-from fastapi import FastAPI, UploadFile, File, Form, Depends, HTTPException, BackgroundTasks
+from fastapi import FastAPI, UploadFile, File, Form, Depends, HTTPException, BackgroundTasks, Response
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
@@ -208,15 +208,17 @@ def _run_match_all(log_id, source: str = None, only_unmatched: bool = True):
         log.jobs_found = len(jobs)
         db.commit()
 
-        matched = 0
-        for job in jobs:
+        for i, job in enumerate(jobs, start=1):
             try:
                 process_jobs_for_matching([job], resumes, db)
-                matched += 1
-                log.matches_found = matched
-                db.commit()
             except Exception as e:
                 logger.error(f"Match failed for job {job.id}: {e}")
+            # Count jobs actually processed (attempted), not jobs successfully
+            # scored — a job already applied to is skipped inside
+            # process_jobs_for_matching with zero LLM calls, but it has still
+            # been "handled" for the purposes of this run's progress.
+            log.matches_found = i
+            db.commit()
 
         log.status = "done"
         db.commit()
@@ -392,8 +394,9 @@ def _serialize_log(log: IngestionLog) -> dict:
 
 
 @app.get("/pipeline/status")
-def pipeline_status(db: Session = Depends(get_db)):
+def pipeline_status(response: Response, db: Session = Depends(get_db)):
     """Latest pipeline run's stage and counts, for progress display."""
+    response.headers["Cache-Control"] = "no-store"
     log = db.query(IngestionLog).order_by(desc(IngestionLog.ran_at)).first()
     if not log:
         return None
@@ -401,12 +404,13 @@ def pipeline_status(db: Session = Depends(get_db)):
 
 
 @app.get("/pipeline/status/{log_id}")
-def pipeline_status_by_id(log_id: UUID, db: Session = Depends(get_db)):
+def pipeline_status_by_id(log_id: UUID, response: Response, db: Session = Depends(get_db)):
     """
     Status of one specific run, identified by the log_id returned when it was
     triggered. Use this to track a run you started without it being clobbered
     by unrelated concurrent runs (e.g. the scheduler's periodic ingestion).
     """
+    response.headers["Cache-Control"] = "no-store"
     log = db.query(IngestionLog).filter_by(id=log_id).first()
     if not log:
         raise HTTPException(404, "Run not found")
