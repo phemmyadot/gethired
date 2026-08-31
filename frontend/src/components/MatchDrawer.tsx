@@ -92,13 +92,22 @@ export function MatchDrawer({ match, onClose, onApplied, onViewApplication }: {
                   <StatusPill status={match.apply_status ?? "applied"} />
                 )
               ) : !coverLetter ? (
-                <button
-                  onClick={handleGenerate}
-                  disabled={generating}
-                  className="text-sm font-semibold px-4 py-1.5 rounded-full bg-ink text-paper hover:bg-ink/85 disabled:opacity-50 transition-colors"
-                >
-                  {generating ? "Generating…" : "Generate cover letter"}
-                </button>
+                <>
+                  <button
+                    onClick={handleGenerate}
+                    disabled={generating}
+                    className="text-sm font-semibold px-4 py-1.5 rounded-full bg-ink text-paper hover:bg-ink/85 disabled:opacity-50 transition-colors"
+                  >
+                    {generating ? "Generating…" : "Generate cover letter"}
+                  </button>
+                  <button
+                    onClick={handleMarkApplied}
+                    disabled={marking}
+                    className="text-sm font-semibold px-4 py-1.5 rounded-full bg-teal text-white hover:bg-teal/90 disabled:opacity-50 transition-colors"
+                  >
+                    {marking ? "Saving…" : "Mark as applied"}
+                  </button>
+                </>
               ) : null}
             </div>
             {error && <div className="text-sm text-rose mt-2.5">{error}</div>}
