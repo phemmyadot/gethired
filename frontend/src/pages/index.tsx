@@ -2,8 +2,8 @@
 import Head from "next/head";
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
-  getStats, getMatches, getApplications, getResumes, getJobs, triggerPipeline, getPipelineStatus,
-  type Stats, type Match, type Application, type Resume, type Job, type PipelineStatus,
+  getStats, getMatches, getApplications, getResumes, triggerPipeline, getPipelineStatus,
+  type Stats, type Match, type Application, type Resume, type PipelineStatus,
 } from "../lib/api";
 import { Sidebar, type Tab } from "../components/Sidebar";
 import { StatsStrip } from "../components/StatsStrip";
@@ -21,7 +21,6 @@ export default function Home() {
   const [matches, setMatches] = useState<Match[]>([]);
   const [apps, setApps] = useState<Application[]>([]);
   const [resumes, setResumes] = useState<Resume[]>([]);
-  const [jobs, setJobs] = useState<Job[]>([]);
   const [pipelineRunning, setPipelineRunning] = useState(false);
   const [pipelineStatus, setPipelineStatus] = useState<PipelineStatus>(null);
   const [lastRun, setLastRun] = useState<string | null>(null);
@@ -37,13 +36,12 @@ export default function Home() {
     const s = await getStats().catch(() => null);
     if (s) setStats(s);
 
-    const [m, a, r, j] = await Promise.allSettled([
-      getMatches(s?.score_threshold ?? 0.7), getApplications(), getResumes(), getJobs(),
+    const [m, a, r] = await Promise.allSettled([
+      getMatches(s?.score_threshold ?? 0.7), getApplications(), getResumes(),
     ]);
     if (m.status === "fulfilled") setMatches(m.value);
     if (a.status === "fulfilled") setApps(a.value);
     if (r.status === "fulfilled") setResumes(r.value);
-    if (j.status === "fulfilled") setJobs(j.value);
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -113,7 +111,7 @@ export default function Home() {
           {tab === "matches"      && <MatchesTab matches={matches} resumes={resumes} onRefresh={load} onViewApplication={viewApplication} />}
           {tab === "applications" && <ApplicationsTab apps={apps} onRefresh={load} focusedAppId={focusedAppId} onFocusHandled={() => setFocusedAppId(null)} />}
           {tab === "resumes"      && <ResumesTab resumes={resumes} onRefresh={load} />}
-          {tab === "jobs"         && <JobsTab jobs={jobs} onViewApplication={viewApplication} />}
+          {tab === "jobs"         && <JobsTab onViewApplication={viewApplication} />}
         </div>
       </main>
     </div>

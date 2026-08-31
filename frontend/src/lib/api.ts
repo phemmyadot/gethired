@@ -35,8 +35,18 @@ export type Job = {
   applied: boolean; application_id: string | null;
   score: number | null; resume_label: string | null;
 };
-export const getJobs = (source?: string) =>
-  req<Job[]>(`/jobs${source ? `?source=${source}` : ""}`);
+export type JobsPage = { items: Job[]; total: number };
+export const getJobs = (opts?: { source?: string; limit?: number; offset?: number; sort?: "fetched" | "score" }) => {
+  const params = new URLSearchParams();
+  if (opts?.source) params.set("source", opts.source);
+  if (opts?.limit != null) params.set("limit", String(opts.limit));
+  if (opts?.offset != null) params.set("offset", String(opts.offset));
+  if (opts?.sort) params.set("sort", opts.sort);
+  const qs = params.toString();
+  return req<JobsPage>(`/jobs${qs ? `?${qs}` : ""}`);
+};
+export const matchJob = (jobId: string) =>
+  req<{ score: number | null; resume_label: string | null }>(`/jobs/${jobId}/match`, { method: "POST" });
 
 // ── Matches ────────────────────────────────────────────────
 export type Match = {

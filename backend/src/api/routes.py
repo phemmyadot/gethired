@@ -104,17 +104,38 @@ def delete_resume(resume_id: UUID, db: Session = Depends(get_db)):
 
 @app.get("/jobs")
 def list_jobs(
-    limit: int = 50,
+    limit: int = 48,
     offset: int = 0,
     source: str = None,
+    sort: str = "fetched",  # "fetched" | "score"
     db: Session = Depends(get_db),
 ):
-    q = db.query(Job).filter_by(expired=False)
+    from sqlalchemy import func, nullslast
+
+    best_score_subq = (
+        db.query(JobMatch.job_id, func.max(JobMatch.score).label("best_score"))
+        .group_by(JobMatch.job_id)
+        .subquery()
+    )
+
+    q = (
+        db.query(Job, best_score_subq.c.best_score)
+        .outerjoin(best_score_subq, Job.id == best_score_subq.c.job_id)
+        .filter(Job.expired == False)
+    )
     if source:
-        q = q.filter_by(source=source)
-    jobs = q.order_by(desc(Job.fetched_at)).limit(limit).offset(offset).all()
+        q = q.filter(Job.source == source)
+    total = q.count()
+
+    if sort == "score":
+        # Unmatched jobs (NULL score) sort last, not first
+        q = q.order_by(nullslast(desc(best_score_subq.c.best_score)), desc(Job.fetched_at))
+    else:
+        q = q.order_by(desc(Job.fetched_at))
+
+    rows = q.limit(limit).offset(offset).all()
     results = []
-    for j in jobs:
+    for j, _ in rows:
         applied = db.query(AppliedJob).filter_by(job_id=j.id).first()
         best_match = (
             db.query(JobMatch)
@@ -132,7 +153,32 @@ def list_jobs(
             "score": round(best_match.score, 3) if best_match else None,
             "resume_label": best_match.resume.label if best_match and best_match.resume else None,
         })
-    return results
+    return {"items": results, "total": total}
+
+
+@app.post("/jobs/{job_id}/match")
+def match_job(job_id: UUID, db: Session = Depends(get_db)):
+    """(Re-)score a single job against all active resumes via the LLM."""
+    job = db.query(Job).filter_by(id=job_id).first()
+    if not job:
+        raise HTTPException(404, "Job not found")
+
+    resumes = db.query(Resume).filter_by(user_id=USER_ID, active=True).all()
+    if not resumes:
+        raise HTTPException(400, "No active resumes to match against")
+
+    process_jobs_for_matching([job], resumes, db)
+
+    best_match = (
+        db.query(JobMatch)
+        .filter_by(job_id=job.id)
+        .order_by(desc(JobMatch.score))
+        .first()
+    )
+    return {
+        "score": round(best_match.score, 3) if best_match else None,
+        "resume_label": best_match.resume.label if best_match and best_match.resume else None,
+    }
 
 
 # ─────────────────────────────────────────────

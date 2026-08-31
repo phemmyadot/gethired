@@ -5,6 +5,7 @@ import { MatchDrawer } from "../MatchDrawer";
 
 function toCardData(m: Match): JobCardData {
   return {
+    id: m.job_id,
     title: m.job_title,
     company: m.company,
     source: m.source,
