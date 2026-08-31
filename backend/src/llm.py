@@ -1,5 +1,6 @@
 import logging
 import os
+import time
 from typing import Any
 
 import httpx
@@ -60,22 +61,36 @@ def call_anthropic(prompt: str, system_prompt: str | None = None) -> str:
 
 def generate_text(prompt: str, system_prompt: str | None = None) -> str:
     provider = os.getenv("LLM_PROVIDER", "local").lower()
+    prompt_chars = len(prompt) + len(system_prompt or "")
+    start = time.monotonic()
+
+    def _log_timing(used_provider: str):
+        elapsed = time.monotonic() - start
+        logger.info(
+            f"LLM call [{used_provider}]: {elapsed:.2f}s, prompt={prompt_chars} chars"
+        )
 
     if provider == "anthropic":
         try:
-            return call_anthropic(prompt, system_prompt)
+            result = call_anthropic(prompt, system_prompt)
+            _log_timing("anthropic")
+            return result
         except Exception as exc:
             logger.warning("Anthropic provider failed: %s", exc)
 
     if provider in {"local", "openai_compatible"}:
         try:
-            return call_local_llm(prompt, system_prompt)
+            result = call_local_llm(prompt, system_prompt)
+            _log_timing("local")
+            return result
         except Exception as exc:
             logger.warning("Local LLM provider failed: %s", exc)
 
     if os.getenv("ANTHROPIC_API_KEY"):
         try:
-            return call_anthropic(prompt, system_prompt)
+            result = call_anthropic(prompt, system_prompt)
+            _log_timing("anthropic_fallback")
+            return result
         except Exception as exc:
             logger.warning("Anthropic fallback failed: %s", exc)
 

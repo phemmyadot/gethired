@@ -69,6 +69,43 @@ export default function Home() {
 
   useEffect(() => () => stopPolling(), [stopPolling]);
 
+  // Log a progress snapshot every 5 minutes while a run is in progress, so
+  // long-running matches/ingestion have a visible trail in the browser
+  // console for diagnosing whether they're actually advancing. Reads
+  // pipelineStatus via a ref so the 5-minute interval isn't torn down and
+  // recreated on every 1.5s poll tick.
+  const statusRef = useRef<PipelineStatus>(null);
+  statusRef.current = pipelineStatus;
+  const runStartRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const inProgress = pipelineStatus != null && IN_PROGRESS_STATUSES.includes(pipelineStatus.status);
+    if (!inProgress) {
+      runStartRef.current = null;
+      return;
+    }
+    if (runStartRef.current != null) return; // logging interval already running for this run
+
+    runStartRef.current = Date.now();
+    const startedAt = runStartRef.current;
+
+    const logInterval = setInterval(() => {
+      const status = statusRef.current;
+      if (!status || !IN_PROGRESS_STATUSES.includes(status.status)) return;
+      const elapsedMin = ((Date.now() - startedAt) / 60000).toFixed(1);
+      const done = status.matches_found ?? 0;
+      const total = status.jobs_found ?? 0;
+      const rate = done > 0 ? (Number(elapsedMin) / done).toFixed(2) : "n/a";
+      console.log(
+        `[pipeline ${status.id}] ${status.status} — ${done}/${total} ` +
+        `after ${elapsedMin}min (~${rate} min/job)`
+      );
+    }, 5 * 60 * 1000);
+
+    return () => clearInterval(logInterval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pipelineStatus?.status]);
+
   // On mount (including a page refresh), check whether a run is already in
   // progress on the backend and resume polling it instead of leaving the UI
   // unaware — otherwise a refresh mid-run would let the user start a

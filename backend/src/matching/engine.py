@@ -4,6 +4,7 @@ Returns the best resume and score for each job.
 """
 import json
 import logging
+import time
 import concurrent.futures
 from sqlalchemy.orm import Session
 
@@ -205,6 +206,7 @@ def process_jobs_for_matching(
 
     for job in jobs:
         job_id = str(job.id)
+        job_start = time.monotonic()
 
         # Dedup guard
         if already_applied(job_id, db):
@@ -227,6 +229,9 @@ def process_jobs_for_matching(
 
         # Save all scores for the dashboard
         save_matches(job_id, scores, db)
+
+        job_elapsed = time.monotonic() - job_start
+        logger.info(f"Job processed in {job_elapsed:.2f}s: {job.title} @ {job.company}")
 
         best = scores[0]
         if best["score"] >= SCORE_THRESHOLD:
