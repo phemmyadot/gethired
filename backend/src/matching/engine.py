@@ -37,7 +37,7 @@ If unclear from the text, make your best guess from context (title, seniority, i
 def detect_work_mode(job: dict) -> str:
     """Classify a job's work mode via the LLM. One call per job, not per resume."""
     try:
-        prompt = WORK_MODE_PROMPT.format(title=job["title"], description=job["description"][:2000])
+        prompt = WORK_MODE_PROMPT.format(title=job["title"], description=job["description"][:800])
         raw = generate_text(prompt)
         result = json.loads(raw)
         mode = result.get("work_mode", "").lower()
@@ -90,10 +90,10 @@ def score_one(resume: dict, job: dict) -> dict:
     """Synchronously score one resume against one job via Claude."""
     prompt = SCORE_PROMPT.format(
         label=resume["label"],
-        resume_content=resume["content"][:4000],  # token budget
+        resume_content=resume["content"][:2500],  # token budget — local models are latency-sensitive to input size
         title=job["title"],
         company=job["company"],
-        description=job["description"][:3000],
+        description=job["description"][:1800],
     )
 
     try:

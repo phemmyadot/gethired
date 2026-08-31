@@ -89,9 +89,7 @@ export function JobsTab({ onViewApplication, onMatchAll, matching, matchProgress
           disabled={matching}
           className="text-xs font-semibold px-3.5 py-1.5 rounded-full bg-accent text-white hover:bg-accent/90 disabled:opacity-50 transition-colors whitespace-nowrap"
         >
-          {matching
-            ? `Matching… ${matchProgress?.matches_found ?? 0}/${matchProgress?.jobs_found ?? 0}`
-            : "Match / rematch all"}
+          {matching ? "Matching…" : "Match unmatched"}
         </button>
 
         <div className="ml-auto flex items-center gap-3">
@@ -113,6 +111,32 @@ export function JobsTab({ onViewApplication, onMatchAll, matching, matchProgress
           </span>
         </div>
       </div>
+
+      {matching && (
+        <div className="bg-accent-soft rounded-xl2 px-5 py-4 flex items-center gap-4">
+          <span className="inline-block w-2 h-2 rounded-full bg-accent animate-pulse shrink-0" />
+          <div className="flex-1">
+            <div className="flex items-center justify-between text-sm text-ink mb-1.5">
+              <span>Matching jobs against your resume…</span>
+              <span className="font-mono text-accent font-semibold">
+                {matchProgress?.matches_found ?? 0} / {matchProgress?.jobs_found ?? 0}
+              </span>
+            </div>
+            <div className="h-1.5 bg-white/60 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-accent rounded-full transition-all duration-500"
+                style={{
+                  width: `${
+                    matchProgress?.jobs_found
+                      ? Math.min(100, ((matchProgress.matches_found ?? 0) / matchProgress.jobs_found) * 100)
+                      : 0
+                  }%`,
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
 
       {loading ? (
         <div className="py-20 text-center text-muted text-sm">Loading…</div>

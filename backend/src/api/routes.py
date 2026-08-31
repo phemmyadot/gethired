@@ -160,9 +160,14 @@ def list_jobs(
 def match_all_jobs(
     background_tasks: BackgroundTasks,
     source: str = None,
+    only_unmatched: bool = True,
     db: Session = Depends(get_db),
 ):
-    """(Re-)score every non-expired job (optionally filtered by source) against all active resumes."""
+    """
+    Score jobs against the primary active resume.
+    By default only scores jobs with no existing match; pass only_unmatched=false
+    to force a full re-score (e.g. after updating your resume).
+    """
     resumes = db.query(Resume).filter_by(user_id=USER_ID, active=True).all()
     if not resumes:
         raise HTTPException(400, "No active resumes to match against")
@@ -172,11 +177,11 @@ def match_all_jobs(
     db.commit()
     log_id = log.id
 
-    background_tasks.add_task(_run_match_all, log_id, source)
+    background_tasks.add_task(_run_match_all, log_id, source, only_unmatched)
     return {"message": "Matching started in background", "log_id": str(log_id)}
 
 
-def _run_match_all(log_id, source: str = None):
+def _run_match_all(log_id, source: str = None, only_unmatched: bool = True):
     db = get_session()
     try:
         log = db.query(IngestionLog).filter_by(id=log_id).first()
@@ -187,9 +192,17 @@ def _run_match_all(log_id, source: str = None):
             db.commit()
             return
 
+        # Score against the primary (most recently uploaded) resume only —
+        # scoring every job against every resume was the main cost driver.
+        primary_resume = max(resumes, key=lambda r: r.created_at)
+        resumes = [primary_resume]
+
         q = db.query(Job).filter_by(expired=False)
         if source:
             q = q.filter_by(source=source)
+        if only_unmatched:
+            matched_job_ids = db.query(JobMatch.job_id).distinct()
+            q = q.filter(~Job.id.in_(matched_job_ids))
         jobs = q.all()
 
         log.jobs_found = len(jobs)
