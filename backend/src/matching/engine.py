@@ -48,21 +48,29 @@ def detect_work_mode(job: dict) -> str:
         return "onsite"
 
 
-SCORE_PROMPT = """You are a senior technical recruiter with 15 years experience.
-Evaluate how well this candidate's resume matches the job description.
+SCORE_PROMPT = """You are a strict senior technical recruiter. Assume a resume does NOT match
+until you find concrete evidence otherwise. A shared buzzword or tool (e.g. both mention "React"
+or "Node.js") does NOT mean the candidate is qualified for a different discipline.
 
-Score by rating FOUR sub-factors independently on a 0-100 scale, then averaging them.
-Do not skip this step or eyeball a final number directly — compute each sub-score first from
-concrete evidence in the resume and job description, using the full 0-100 range where warranted:
+First, identify the job's core discipline (e.g. mobile engineering, backend/API engineering, data
+engineering, sales, DevOps, ML engineering) and the resume's primary discipline from its actual
+work history. If they differ, cap required_skills_pct and domain_fit_pct at 35 regardless of any
+shared tools or languages — only go higher if the resume's actual day-to-day work matches the
+job's actual day-to-day work.
 
-1. required_skills_pct (0-100): what percentage of the job's explicitly required skills/tools
-   does the resume demonstrate? Count them if you can.
-2. experience_years_pct (0-100): does the resume show enough relevant years of experience for
-   this role? 100 = meets or exceeds, lower = proportional shortfall.
-3. domain_fit_pct (0-100): how closely does the resume's domain/industry background match what
-   this job needs?
-4. seniority_fit_pct (0-100): does the resume's seniority level match the role (not over- or
-   under-qualified)?
+For required_skills_pct: only count a required skill as demonstrated if the resume shows it was
+used hands-on for similar work, not just listed or mentioned in passing. A resume matching 0-1 of
+6+ required skills should score 0-15, not 60-80.
+
+Rate FOUR sub-factors on a 0-100 scale:
+
+1. required_skills_pct (0-100): % of the job's explicitly required skills/tools genuinely
+   demonstrated in the resume (see rule above).
+2. experience_years_pct (0-100): enough relevant years IN THIS DISCIPLINE (not just total years
+   in tech)? 100 = meets or exceeds.
+3. domain_fit_pct (0-100): per the discipline check above.
+4. seniority_fit_pct (0-100): does seniority level match (not over/under-qualified)? Level only,
+   not discipline fit.
 
 RESUME LABEL: {label}
 RESUME:
@@ -74,6 +82,8 @@ JOB DESCRIPTION:
 
 Respond ONLY with valid JSON — no markdown, no preamble:
 {{
+  "job_discipline": "the job's core discipline, 2-4 words",
+  "resume_discipline": "the resume's primary discipline based on actual work history, 2-4 words",
   "required_skills_pct": <int 0-100>,
   "experience_years_pct": <int 0-100>,
   "domain_fit_pct": <int 0-100>,
@@ -89,7 +99,7 @@ Respond ONLY with valid JSON — no markdown, no preamble:
 key_skills: the job posting's own top required skills/tools/technologies, independent of this
   resume (max 6) — this describes what the JOB wants, not how well the candidate matches it
 missing_skills: skills in job description not evident in resume (max 5)
-selling_points: strongest resume points for this role (max 4)
+selling_points: strongest resume points for this role (max 4) — omit if disciplines don't match
 seniority_fit: is this role a good level match?
 recommended_resume: true if this is likely the best resume to use
 
@@ -115,15 +125,30 @@ def score_one(resume: dict, job: dict) -> dict:
         # prone to anchoring on whatever example values appear in the
         # prompt (this happened twice: first on a literal example score,
         # then again on a number listed as a "variety" example).
-        sub_scores = [
-            result.get("required_skills_pct"),
-            result.get("experience_years_pct"),
-            result.get("domain_fit_pct"),
-            result.get("seniority_fit_pct"),
-        ]
-        if any(s is None for s in sub_scores):
+        #
+        # Weighted, not averaged: a flat average let strong experience/domain/
+        # seniority scores mask near-zero required-skill overlap (e.g. a
+        # mobile engineer scored 75% against a backend API role because only
+        # 1 of 4 sub-scores reflected the actual skill mismatch). Required
+        # skills now dominate the score so a real skills gap can't be
+        # papered over by tenure or adjacent domain experience.
+        sub_scores = {
+            "required_skills_pct": result.get("required_skills_pct"),
+            "experience_years_pct": result.get("experience_years_pct"),
+            "domain_fit_pct": result.get("domain_fit_pct"),
+            "seniority_fit_pct": result.get("seniority_fit_pct"),
+        }
+        if any(v is None for v in sub_scores.values()):
             raise ValueError(f"Missing sub-score(s) in LLM response: {result}")
-        result["score"] = round(sum(sub_scores) / len(sub_scores) / 100, 3)
+
+        weights = {
+            "required_skills_pct": 0.50,
+            "experience_years_pct": 0.20,
+            "domain_fit_pct": 0.15,
+            "seniority_fit_pct": 0.15,
+        }
+        weighted = sum(sub_scores[k] * weights[k] for k in weights)
+        result["score"] = round(weighted / 100, 3)
         result["failed"] = False
     except json.JSONDecodeError as e:
         logger.error(f"JSON parse error for {resume['label']} / {job['title']}: {e}")
