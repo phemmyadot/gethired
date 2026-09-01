@@ -86,7 +86,8 @@ export const updateAppStatus = (id: string, status: string, notes?: string) =>
 export type Stats = {
   total_jobs: number; total_resumes: number; total_matches: number;
   total_scored_jobs: number;
-  total_applied: number; interviews: number; offers: number;
+  total_applied: number; total_applied_all: number; applied_with_match: number;
+  interviews: number; offers: number;
   score_threshold: number;
 };
 export const getStats = () => req<Stats>("/stats");

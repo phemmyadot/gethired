@@ -38,15 +38,24 @@ export function DashboardTab({ stats }: { stats: Stats | null }) {
 
       <div>
         <h2 className="font-display text-lg font-semibold text-ink mb-4">At a glance</h2>
-        <div className="grid grid-cols-2 gap-5">
+        <div className="grid grid-cols-3 gap-5">
           <div className="bg-surface rounded-xl2 border border-border/60 shadow-card p-6 flex flex-col gap-1.5">
             <span className="text-xs font-medium text-muted uppercase tracking-wide">Apply rate</span>
             <span className="font-display text-3xl font-semibold text-teal">
               {stats?.total_matches
-                ? `${Math.round((stats.total_applied / stats.total_matches) * 100)}%`
+                ? `${Math.round(((stats.applied_with_match ?? 0) / stats.total_matches) * 100)}%`
                 : "—"}
             </span>
             <span className="text-sm text-muted">of matches applied to</span>
+          </div>
+          <div className="bg-surface rounded-xl2 border border-border/60 shadow-card p-6 flex flex-col gap-1.5">
+            <span className="text-xs font-medium text-muted uppercase tracking-wide">Applied were matched</span>
+            <span className="font-display text-3xl font-semibold text-sky">
+              {stats?.total_applied_all
+                ? `${Math.round(((stats.applied_with_match ?? 0) / stats.total_applied_all) * 100)}%`
+                : "—"}
+            </span>
+            <span className="text-sm text-muted">of applied jobs cleared the match threshold</span>
           </div>
           <div className="bg-surface rounded-xl2 border border-border/60 shadow-card p-6 flex flex-col gap-1.5">
             <span className="text-xs font-medium text-muted uppercase tracking-wide">Interview rate</span>

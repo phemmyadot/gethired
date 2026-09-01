@@ -489,6 +489,14 @@ def get_stats(db: Session = Depends(get_db)):
         "total_matches":    db.query(JobMatch).filter(JobMatch.score >= SCORE_THRESHOLD).count(),
         "total_scored_jobs": db.query(JobMatch.job_id).distinct().count(),
         "total_applied":    db.query(AppliedJob).filter_by(status="applied").count(),
+        "total_applied_all": db.query(AppliedJob).count(),
+        "applied_with_match": (
+            db.query(AppliedJob.job_id)
+            .join(JobMatch, JobMatch.job_id == AppliedJob.job_id)
+            .filter(JobMatch.score >= SCORE_THRESHOLD)
+            .distinct()
+            .count()
+        ),
         "interviews":       db.query(AppliedJob).filter_by(status="interview").count(),
         "offers":           db.query(AppliedJob).filter_by(status="offer").count(),
         "last_run":         db.query(IngestionLog).order_by(desc(IngestionLog.ran_at)).first(),

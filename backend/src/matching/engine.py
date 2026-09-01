@@ -277,11 +277,7 @@ def process_jobs_for_matching(
     for job in jobs:
         job_id = str(job.id)
         job_start = time.monotonic()
-
-        # Dedup guard
-        if already_applied(job_id, db):
-            logger.debug(f"SKIP (applied): {job.title} @ {job.company}")
-            continue
+        applied = already_applied(job_id, db)
 
         job_dict = {
             "id":          job_id,
@@ -313,7 +309,12 @@ def process_jobs_for_matching(
         logger.info(f"Job processed in {job_elapsed:.2f}s: {job.title} @ {job.company}")
 
         best = scores[0]
-        if best["score"] >= SCORE_THRESHOLD:
+        if best["score"] >= SCORE_THRESHOLD and applied:
+            # Already applied — still fully scored/saved above (so Matches/
+            # Jobs feed show accurate data), just excluded from the
+            # auto-apply candidate set so we never try to apply again.
+            logger.debug(f"SKIP candidate (already applied): {job.title} @ {job.company}")
+        elif best["score"] >= SCORE_THRESHOLD:
             logger.info(
                 f"✓ MATCH {best['score']:.0%}: {job.title} @ {job.company} "
                 f"→ {best['resume_label']}"

@@ -31,6 +31,53 @@ DEFAULT_BLOCKED_TITLES = [
 
 DEFAULT_REQUIRED_KEYWORDS: list[str] = []  # e.g. ["python", "react"]
 
+# Non-US signals in free-text location fields. Blacklist approach (not
+# whitelist) because US locations are wildly varied (city/state/county
+# combos, "Remote", "Hybrid", "N/A", etc.) but non-US country/city names are
+# a much smaller, more reliable set to match against.
+NON_US_LOCATION_SIGNALS = [
+    "india", "bengaluru", "bangalore", "gurugram", "gurgaon", "pune", "delhi",
+    "hyderabad", "mumbai", "chennai", "noida",
+    "singapore", "hong kong", "japan", "tokyo", "south korea", "seoul",
+    "china", "shanghai", "beijing", "taiwan", "taipei", "vietnam", "hanoi",
+    "philippines", "manila", "indonesia", "jakarta", "malaysia", "kuala lumpur",
+    "thailand", "bangkok",
+    "united kingdom", "england", " uk", "uk ", "uk,", "uk)", "uk-", "-uk",
+    "london", "dublin", "ireland", "germany", "berlin", "munich", "hamburg",
+    "cologne", "france", "paris", "netherlands", "amsterdam", "spain", "madrid",
+    "barcelona", "italy", "milan", "rome", "portugal", "lisbon", "poland",
+    "warsaw", "finland", "helsinki", "sweden", "stockholm", "norway", "oslo",
+    "denmark", "copenhagen", "switzerland", "zurich", "austria", "vienna",
+    "belgium", "brussels", "serbia", "belgrade", "greece", "athens", "romania",
+    "bucharest", "deutschland", "europe",
+    "canada", "toronto", "montreal", "vancouver", "ottawa",
+    "mexico", "mexico city", "colombia", "bogota", "brazil", "sao paulo",
+    "argentina", "buenos aires", "chile", "santiago", "peru",
+    "australia", "sydney", "melbourne", "new zealand", "auckland",
+    "south africa", "nigeria", "kenya", "egypt", "israel", "tel aviv",
+    "united arab emirates", "dubai", "saudi arabia",
+]
+
+US_OVERRIDE_SIGNALS = ["united states", "usa", "u.s.", " us ", " us,", " us)", "us-", "-us"]
+
+
+def _is_non_us_location(location: str) -> bool:
+    """
+    Best-effort US-only filter on free-text location strings from various
+    sources. Only blocks when a non-US signal is present AND no explicit
+    US signal is also present (many ATS postings list multiple offices,
+    e.g. "San Francisco, CA | London, UK" — we don't want to drop those
+    since a US office is available).
+    """
+    if not location:
+        return False
+    loc = f" {location.lower()} "
+    has_non_us = any(sig in loc for sig in NON_US_LOCATION_SIGNALS)
+    if not has_non_us:
+        return False
+    has_us = any(sig in loc for sig in US_OVERRIDE_SIGNALS)
+    return not has_us
+
 def _default_sources() -> list[str]:
     sources = ["adzuna", "remotive", "remoteok", "jobicy", "arbeitnow"]
     if os.getenv("GREENHOUSE_ENABLED", "false").lower() == "true":
@@ -122,6 +169,10 @@ def pre_filter(job: dict, prefs: dict = None) -> bool:
 
     # Must have apply URL
     if not job["apply_url"]:
+        return False
+
+    # US-only: drop jobs whose location is clearly outside the US
+    if _is_non_us_location(job.get("location", "")):
         return False
 
     return True
