@@ -403,3 +403,130 @@ def fetch_lever_all(companies: list[str] = None) -> list[dict]:
         except Exception as e:
             logger.warning(f"Lever/{company} failed: {e}")
     return all_jobs
+
+
+# ─────────────────────────────────────────────
+# Source 5: Ashby ATS (per company)
+# ─────────────────────────────────────────────
+
+_DEFAULT_ASHBY_COMPANIES: list[str] = []  # populated dynamically via discovery; no static defaults
+
+ASHBY_COMPANIES = _companies_from_env("ASHBY_COMPANY_TOKENS", _DEFAULT_ASHBY_COMPANIES)
+
+def fetch_ashby_company(board_token: str) -> list[dict]:
+    """Fetch all open jobs for one company on Ashby."""
+    url = f"https://api.ashbyhq.com/posting-api/job-board/{board_token}"
+    data = _get(url)
+
+    if not data or "jobs" not in data:
+        return []
+
+    import re
+    jobs = []
+    for r in data["jobs"]:
+        desc = re.sub(r"<[^>]+>", " ", r.get("descriptionHtml", "")).strip()
+        jobs.append(_normalize({
+            "source":      "ashby",
+            "external_id": r.get("id", ""),
+            "title":       (r.get("title") or "").strip(),
+            "company":     board_token.capitalize(),
+            "description": desc,
+            "location":    r.get("location", ""),
+            "remote":      bool(r.get("isRemote", False)),
+            "salary_min":  None,
+            "salary_max":  None,
+            "apply_url":   r.get("applyUrl", r.get("jobUrl", "")),
+            "posted_at":   r.get("publishedAt"),  # ISO 8601 string
+        }))
+
+    return jobs
+
+
+def fetch_ashby_all(companies: list[str] = None) -> list[dict]:
+    """Fetch from all configured Ashby companies."""
+    targets = companies or ASHBY_COMPANIES
+    all_jobs = []
+    for company in targets:
+        try:
+            jobs = fetch_ashby_company(company)
+            all_jobs.extend(jobs)
+            logger.info(f"Ashby/{company}: {len(jobs)} jobs")
+            time.sleep(0.3)
+        except Exception as e:
+            logger.warning(f"Ashby/{company} failed: {e}")
+    return all_jobs
+
+
+# ─────────────────────────────────────────────
+# Dynamic company discovery: probe aggregator-sourced company names for a
+# matching Greenhouse/Lever/Ashby board, cache results so nothing is ever
+# re-probed once resolved either way.
+# ─────────────────────────────────────────────
+
+_ATS_SUFFIXES = [
+    " inc.", " inc", " llc", " corp.", " corp", " ltd.", " ltd",
+    " co.", " co", " corporation", " incorporated", " limited",
+]
+
+
+def slug_candidates(company_name: str) -> list[str]:
+    """
+    e.g. 'Notion Labs, Inc.' -> ['notion-labs-inc', 'notion-labs', 'notion']
+    Ordered most-specific to least-specific; callers should stop at the
+    first slug that resolves.
+    """
+    import re
+
+    name = company_name.strip().lower()
+    name = name.replace(",", "")
+    for suffix in _ATS_SUFFIXES:
+        if name.endswith(suffix):
+            name = name[: -len(suffix)].strip()
+
+    full_slug = re.sub(r"[^a-z0-9]+", "-", name).strip("-")
+    words = full_slug.split("-")
+
+    candidates = [full_slug]
+    if len(words) > 1:
+        candidates.append("-".join(words[:-1]))  # drop last word, e.g. "notion-labs"
+        candidates.append(words[0])              # just first word, e.g. "notion"
+
+    # Dedup while preserving order
+    seen = set()
+    result = []
+    for c in candidates:
+        if c and c not in seen:
+            seen.add(c)
+            result.append(c)
+    return result
+
+
+def probe_greenhouse(slug: str) -> bool:
+    try:
+        resp = httpx.get(f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs", timeout=5)
+        return resp.status_code == 200 and bool(resp.json().get("jobs"))
+    except Exception:
+        return False
+
+
+def probe_lever(slug: str) -> bool:
+    try:
+        resp = httpx.get(f"https://api.lever.co/v0/postings/{slug}", params={"mode": "json"}, timeout=5)
+        return resp.status_code == 200 and isinstance(resp.json(), list) and len(resp.json()) > 0
+    except Exception:
+        return False
+
+
+def probe_ashby(slug: str) -> bool:
+    try:
+        resp = httpx.get(f"https://api.ashbyhq.com/posting-api/job-board/{slug}", timeout=5)
+        return resp.status_code == 200 and bool(resp.json().get("jobs"))
+    except Exception:
+        return False
+
+
+PROBE_FUNCS = {
+    "greenhouse": probe_greenhouse,
+    "lever": probe_lever,
+    "ashby": probe_ashby,
+}

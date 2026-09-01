@@ -11,9 +11,11 @@ from sqlalchemy.orm import Session
 
 from .sources import (
     fetch_adzuna, fetch_remotive, fetch_remoteok, fetch_jobicy, fetch_arbeitnow,
-    fetch_greenhouse_all, fetch_lever_all,
+    fetch_greenhouse_all, fetch_lever_all, fetch_ashby_all,
+    GREENHOUSE_COMPANIES, LEVER_COMPANIES,
+    slug_candidates, PROBE_FUNCS,
 )
-from ..db.models import Job, IngestionLog
+from ..db.models import Job, IngestionLog, DiscoveredAtsCompany
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +37,60 @@ def _default_sources() -> list[str]:
         sources.append("greenhouse")
     if os.getenv("LEVER_ENABLED", "false").lower() == "true":
         sources.append("lever")
+    if os.getenv("ASHBY_ENABLED", "true").lower() == "true":
+        sources.append("ashby")
     return sources
+
+
+AGGREGATOR_SOURCES = {"adzuna", "remotive", "remoteok", "jobicy", "arbeitnow"}
+ATS_SOURCES = ["greenhouse", "lever", "ashby"]
+DISCOVERY_PROBE_CAP = int(os.getenv("ATS_DISCOVERY_PROBE_CAP", "10"))  # new companies probed per source per run
+
+
+def discover_ats_companies(db: Session, company_names: set[str]) -> None:
+    """
+    For each company name seen in this run's aggregator results, check
+    whether it also has a Greenhouse/Lever/Ashby board — cache the result
+    (confirmed or not_found) so it's never re-probed. Capped per source per
+    run to keep ingestion latency bounded; makes steady progress over time
+    rather than trying to resolve everything at once.
+    """
+    for source in ATS_SOURCES:
+        already_checked = {
+            r[0] for r in db.query(DiscoveredAtsCompany.company_name)
+            .filter_by(source=source).all()
+        }
+        candidates = [c for c in company_names if c and c not in already_checked][:DISCOVERY_PROBE_CAP]
+        if not candidates:
+            continue
+
+        probe = PROBE_FUNCS[source]
+        for company_name in candidates:
+            confirmed_token = None
+            for slug in slug_candidates(company_name):
+                try:
+                    if probe(slug):
+                        confirmed_token = slug
+                        break
+                except Exception as e:
+                    logger.debug(f"Probe error for {source}/{slug}: {e}")
+
+            db.add(DiscoveredAtsCompany(
+                company_name=company_name,
+                source=source,
+                board_token=confirmed_token,
+                status="confirmed" if confirmed_token else "not_found",
+            ))
+        db.commit()
+        logger.info(
+            f"ATS discovery [{source}]: probed {len(candidates)} companies, "
+            f"{sum(1 for c in candidates if c)} attempted"
+        )
+
+
+def _confirmed_tokens(db: Session, source: str) -> list[str]:
+    rows = db.query(DiscoveredAtsCompany.board_token).filter_by(source=source, status="confirmed").all()
+    return [r[0] for r in rows if r[0]]
 
 def pre_filter(job: dict, prefs: dict = None) -> bool:
     """
@@ -165,11 +220,23 @@ def run_ingestion(db: Session, prefs: dict = None, sources: list[str] = None, lo
         if "arbeitnow" in sources:
             all_raw.extend(fetch_arbeitnow(search=keywords))
 
+    # Discover new Greenhouse/Lever/Ashby companies from aggregator-sourced
+    # company names before fetching those ATS sources, so newly-confirmed
+    # tokens are included in this same run's fetch.
+    aggregator_companies = {j["company"] for j in all_raw if j.get("source") in AGGREGATOR_SOURCES}
+    if aggregator_companies:
+        discover_ats_companies(db, aggregator_companies)
+
     if "greenhouse" in sources:
-        all_raw.extend(fetch_greenhouse_all())
+        companies = list(set(GREENHOUSE_COMPANIES) | set(_confirmed_tokens(db, "greenhouse")))
+        all_raw.extend(fetch_greenhouse_all(companies=companies))
 
     if "lever" in sources:
-        all_raw.extend(fetch_lever_all())
+        companies = list(set(LEVER_COMPANIES) | set(_confirmed_tokens(db, "lever")))
+        all_raw.extend(fetch_lever_all(companies=companies))
+
+    if "ashby" in sources:
+        all_raw.extend(fetch_ashby_all(companies=_confirmed_tokens(db, "ashby") or None))
 
     logger.info(f"Ingestion: {len(all_raw)} total raw jobs from {len(sources)} sources")
 

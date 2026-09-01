@@ -132,3 +132,25 @@ class IngestionLog(Base):
     error       = Column(Text)
     ran_at      = Column(DateTime, default=datetime.utcnow)
     duration_s  = Column(Float)
+
+
+class DiscoveredAtsCompany(Base):
+    """
+    Cache of company-name -> ATS board-token lookups, discovered from company
+    names seen in aggregator results (Adzuna/Remotive/etc). Confirmed tokens
+    feed into fetch_greenhouse_all/fetch_lever_all/fetch_ashby_all so those
+    sources' company lists grow automatically instead of staying a static
+    hand-maintained list. not_found rows are permanent — never re-probed.
+    """
+    __tablename__ = "discovered_ats_companies"
+
+    id           = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_name = Column(String(255), nullable=False)  # raw name as seen from aggregator
+    source       = Column(String(20), nullable=False)   # greenhouse|lever|ashby
+    board_token  = Column(String(255))                  # confirmed slug, NULL if not_found
+    status       = Column(String(20), nullable=False, default="pending")  # confirmed|not_found
+    checked_at   = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("company_name", "source", name="uq_discovered_company_source"),
+    )
