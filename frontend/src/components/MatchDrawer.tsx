@@ -155,6 +155,20 @@ export function MatchDrawer({ match, onClose, onApplied, onViewApplication }: {
             </p>
           </section>
 
+          {/* Key skills required by the job */}
+          {match.key_skills && match.key_skills.length > 0 && (
+            <section>
+              <div className="text-xs font-medium text-muted uppercase tracking-wide mb-2.5">Key skills for this role</div>
+              <div className="flex flex-wrap gap-2">
+                {match.key_skills.map((s, i) => (
+                  <span key={i} className="text-xs font-medium px-2.5 py-1 bg-panel text-ink/80 rounded-full">
+                    {s}
+                  </span>
+                ))}
+              </div>
+            </section>
+          )}
+
           {/* Selling points */}
           {match.selling_points?.length > 0 && (
             <section>

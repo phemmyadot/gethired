@@ -11,6 +11,7 @@ function toCardData(m: Match): JobCardData {
     source: m.source,
     location: m.location,
     workMode: m.work_mode,
+    keySkills: m.key_skills,
     applyUrl: m.apply_url,
     postedAt: m.posted_at,
     fetchedAt: m.fetched_at ?? m.reviewed_at,

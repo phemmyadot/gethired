@@ -2,7 +2,7 @@
 import Head from "next/head";
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
-  getStats, getMatches, getApplications, getResumes, triggerPipeline, getPipelineStatus, getRunStatus, matchAllJobs, stopMatchAll,
+  getStats, getMatches, getApplications, getResumes, triggerPipeline, getPipelineStatus, getRunStatus, matchAllJobs, matchSelectedJobs, stopMatchAll,
   type Stats, type Match, type Application, type Resume, type PipelineStatus,
 } from "../lib/api";
 import { Sidebar, type Tab } from "../components/Sidebar";
@@ -135,20 +135,25 @@ export default function Home() {
     }
   }
 
-  async function handleMatchAll() {
-    setPipelineRunning(true);
-    try {
-      const { log_id } = await matchAllJobs();
-      setMatchAllLogId(log_id);
-      pollStatus(() => getRunStatus(log_id), () => {
-        load();
-        setJobsVersion(v => v + 1);
-        setMatchAllLogId(null);
-      });
-    } finally {
-      setPipelineRunning(false);
-    }
+  function startMatchRun(trigger: () => Promise<{ log_id: string }>) {
+    return async () => {
+      setPipelineRunning(true);
+      try {
+        const { log_id } = await trigger();
+        setMatchAllLogId(log_id);
+        pollStatus(() => getRunStatus(log_id), () => {
+          load();
+          setJobsVersion(v => v + 1);
+          setMatchAllLogId(null);
+        });
+      } finally {
+        setPipelineRunning(false);
+      }
+    };
   }
+
+  const handleMatchAll = startMatchRun(matchAllJobs);
+  const handleMatchSelected = (jobIds: string[]) => startMatchRun(() => matchSelectedJobs(jobIds))();
 
   async function handleStopMatchAll() {
     if (!matchAllLogId) return;
@@ -196,6 +201,7 @@ export default function Home() {
             <JobsTab
               onViewApplication={viewApplication}
               onMatchAll={handleMatchAll}
+              onMatchSelected={handleMatchSelected}
               onStopMatchAll={handleStopMatchAll}
               matching={pipelineRunning || (pipelineStatus != null && IN_PROGRESS_STATUSES.includes(pipelineStatus.status))}
               canStop={matchAllLogId != null && pipelineStatus?.run_type === "match_all" && IN_PROGRESS_STATUSES.includes(pipelineStatus.status)}

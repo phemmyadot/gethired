@@ -51,13 +51,18 @@ def detect_work_mode(job: dict) -> str:
 SCORE_PROMPT = """You are a senior technical recruiter with 15 years experience.
 Evaluate how well this candidate's resume matches the job description.
 
-Be strict and honest. A score of 0.70 means genuinely qualified — not just keyword overlap.
-Consider: required skills match, years of experience, domain fit, seniority alignment.
+Score by rating FOUR sub-factors independently on a 0-100 scale, then averaging them.
+Do not skip this step or eyeball a final number directly — compute each sub-score first from
+concrete evidence in the resume and job description, using the full 0-100 range where warranted:
 
-Do not default to round or "typical-sounding" scores like 0.82, 0.75, or 0.68 out of habit.
-Compute the score fresh for THIS specific resume/job pair — it should vary meaningfully between
-different jobs, including values like 0.41, 0.57, 0.76, 0.93, etc. Two different jobs matched
-against the same resume should almost never score identically unless the fit is truly equivalent.
+1. required_skills_pct (0-100): what percentage of the job's explicitly required skills/tools
+   does the resume demonstrate? Count them if you can.
+2. experience_years_pct (0-100): does the resume show enough relevant years of experience for
+   this role? 100 = meets or exceeds, lower = proportional shortfall.
+3. domain_fit_pct (0-100): how closely does the resume's domain/industry background match what
+   this job needs?
+4. seniority_fit_pct (0-100): does the resume's seniority level match the role (not over- or
+   under-qualified)?
 
 RESUME LABEL: {label}
 RESUME:
@@ -67,24 +72,28 @@ JOB TITLE: {title} at {company}
 JOB DESCRIPTION:
 {description}
 
-First, in your own reasoning, identify: (1) which required skills/years/domain the resume clearly
-covers, (2) which it clearly lacks, (3) how strong the seniority match is. Only after that, derive
-a score consistent with those specific findings — not a general impression.
-
 Respond ONLY with valid JSON — no markdown, no preamble:
 {{
-  "reasoning": "One paragraph explaining the match quality, citing specific resume/job details.",
+  "required_skills_pct": <int 0-100>,
+  "experience_years_pct": <int 0-100>,
+  "domain_fit_pct": <int 0-100>,
+  "seniority_fit_pct": <int 0-100>,
+  "reasoning": "One paragraph explaining the match quality, citing specific resume/job details and referencing the sub-scores above.",
+  "key_skills": ["skill1", "skill2"],
   "missing_skills": ["skill1", "skill2"],
   "selling_points": ["point1", "point2"],
   "seniority_fit": "good|over|under",
-  "recommended_resume": true,
-  "score": <float between 0.0 and 1.0, derived from the reasoning above, not a round default>
+  "recommended_resume": true
 }}
 
+key_skills: the job posting's own top required skills/tools/technologies, independent of this
+  resume (max 6) — this describes what the JOB wants, not how well the candidate matches it
 missing_skills: skills in job description not evident in resume (max 5)
 selling_points: strongest resume points for this role (max 4)
 seniority_fit: is this role a good level match?
-recommended_resume: true if this is likely the best resume to use"""
+recommended_resume: true if this is likely the best resume to use
+
+Do not include a "score" field — it will be computed from your four sub-scores."""
 
 
 def score_one(resume: dict, job: dict) -> dict:
@@ -100,6 +109,22 @@ def score_one(resume: dict, job: dict) -> dict:
     try:
         raw = generate_text(prompt)
         result = json.loads(raw)
+
+        # Compute the score ourselves from the four sub-scores rather than
+        # trusting a model-produced float — a directly-generated score is
+        # prone to anchoring on whatever example values appear in the
+        # prompt (this happened twice: first on a literal example score,
+        # then again on a number listed as a "variety" example).
+        sub_scores = [
+            result.get("required_skills_pct"),
+            result.get("experience_years_pct"),
+            result.get("domain_fit_pct"),
+            result.get("seniority_fit_pct"),
+        ]
+        if any(s is None for s in sub_scores):
+            raise ValueError(f"Missing sub-score(s) in LLM response: {result}")
+        result["score"] = round(sum(sub_scores) / len(sub_scores) / 100, 3)
+        result["failed"] = False
     except json.JSONDecodeError as e:
         logger.error(f"JSON parse error for {resume['label']} / {job['title']}: {e}")
         result = {
@@ -109,11 +134,13 @@ def score_one(resume: dict, job: dict) -> dict:
             "selling_points": [],
             "seniority_fit": "unknown",
             "recommended_resume": False,
+            "failed": True,
         }
     except Exception as e:
         logger.error(f"LLM API error: {e}")
         result = {"score": 0.0, "reasoning": str(e), "missing_skills": [],
-                  "selling_points": [], "seniority_fit": "unknown", "recommended_resume": False}
+                  "selling_points": [], "seniority_fit": "unknown", "recommended_resume": False,
+                  "failed": True}
 
     result["resume_id"] = resume["id"]
     result["resume_label"] = resume["label"]
@@ -142,8 +169,18 @@ def score_job_all_resumes(job: dict, resumes: list[dict]) -> list[dict]:
 # ─────────────────────────────────────────────
 
 def save_matches(job_id: str, scores: list[dict], db: Session):
-    """Upsert match scores for all resumes."""
+    """
+    Upsert match scores for all resumes. Failed LLM calls (parse errors,
+    API errors) are never persisted as a real 0% match — that would
+    permanently block the job from being picked up by a future rematch.
+    """
     for score in scores:
+        if score.get("failed"):
+            logger.warning(
+                f"Skipping save for failed score: job={job_id} resume={score.get('resume_label')}"
+            )
+            continue
+
         existing = db.query(JobMatch).filter_by(
             job_id=job_id,
             resume_id=score["resume_id"]
@@ -230,6 +267,15 @@ def process_jobs_for_matching(
         # Save all scores for the dashboard
         save_matches(job_id, scores, db)
 
+        # key_skills describes the job itself, not a resume pairing — cache
+        # it on the Job row the first time any successful score provides it.
+        if not job.key_skills:
+            for s in scores:
+                if not s.get("failed") and s.get("key_skills"):
+                    job.key_skills = s["key_skills"]
+                    db.commit()
+                    break
+
         job_elapsed = time.monotonic() - job_start
         logger.info(f"Job processed in {job_elapsed:.2f}s: {job.title} @ {job.company}")
 
@@ -247,6 +293,8 @@ def process_jobs_for_matching(
                 "selling_points": best["selling_points"],
                 "missing_skills": best["missing_skills"],
             })
+        elif best.get("failed"):
+            logger.warning(f"✗ SCORING FAILED (not saved, will retry): {job.title} @ {job.company}")
         else:
             logger.info(
                 f"✗ LOW MATCH {best['score']:.0%}: {job.title} @ {job.company} — skip"

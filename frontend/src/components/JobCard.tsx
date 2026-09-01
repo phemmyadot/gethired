@@ -8,6 +8,7 @@ export type JobCardData = {
   source: string;
   location: string | null;
   workMode: WorkMode;
+  keySkills?: string[] | null;
   applyUrl: string;
   postedAt: string | null;        // when the source says the job was listed, if known
   fetchedAt: string;              // when we ingested/last reviewed it
@@ -33,18 +34,36 @@ function shortDate(iso: string) {
   return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
-export function JobCard({ job, onClick, onViewApplication }: {
+function skillsSummary(skills: string[], max = 3) {
+  const shown = skills.slice(0, max).join(", ");
+  const rest = skills.length - max;
+  return rest > 0 ? `${shown} +${rest}` : shown;
+}
+
+export function JobCard({ job, onClick, onViewApplication, selectable, selected, onToggleSelect }: {
   job: JobCardData;
   onClick?: () => void;
   onViewApplication: (applicationId: string) => void;
+  selectable?: boolean;
+  selected?: boolean;
+  onToggleSelect?: (jobId: string) => void;
 }) {
   return (
     <div
       onClick={onClick}
-      className={`bg-surface rounded-xl2 border border-border/60 shadow-card hover:shadow-card-hover transition-shadow p-5 flex flex-col gap-4 ${onClick ? "cursor-pointer" : ""}`}
+      className={`relative bg-surface rounded-xl2 border shadow-card hover:shadow-card-hover transition-shadow p-5 flex flex-col gap-4 ${onClick ? "cursor-pointer" : ""} ${selected ? "border-accent ring-2 ring-accent/30" : "border-border/60"}`}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-3 min-w-0">
+          {selectable && job.id && (
+            <input
+              type="checkbox"
+              checked={!!selected}
+              onChange={() => onToggleSelect?.(job.id!)}
+              onClick={e => e.stopPropagation()}
+              className="w-4 h-4 rounded border-border accent-accent cursor-pointer shrink-0"
+            />
+          )}
           <div className={`w-11 h-11 rounded-xl flex items-center justify-center font-display font-semibold text-lg shrink-0 ${avatarStyle(job.company)}`}>
             {job.company.charAt(0).toUpperCase() || "?"}
           </div>
@@ -65,6 +84,11 @@ export function JobCard({ job, onClick, onViewApplication }: {
             {job.resumeLabel ?? "Not matched"}
           </span>
         </div>
+        {job.keySkills && job.keySkills.length > 0 && (
+          <div className="text-xs text-ink/70 mt-2 truncate" title={job.keySkills.join(", ")}>
+            {skillsSummary(job.keySkills)}
+          </div>
+        )}
         <div className="flex items-center gap-3 mt-2 text-xs text-muted">
           <span>Listed {job.postedAt ? shortDate(job.postedAt) : "—"}</span>
           <span>Fetched {shortDate(job.fetchedAt)}</span>

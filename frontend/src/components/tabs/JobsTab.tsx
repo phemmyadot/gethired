@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
-import { getJobs, type Job, type PipelineStatus } from "../../lib/api";
+import { getJobs, type Job, type Match, type PipelineStatus } from "../../lib/api";
 import { JobCard, type JobCardData } from "../JobCard";
+import { MatchDrawer } from "../MatchDrawer";
 
 const PAGE_SIZE = 48;
 
@@ -12,6 +13,7 @@ function toCardData(j: Job): JobCardData {
     source: j.source,
     location: j.location,
     workMode: j.work_mode,
+    keySkills: j.key_skills,
     applyUrl: j.apply_url,
     postedAt: j.posted_at,
     fetchedAt: j.fetched_at,
@@ -23,9 +25,37 @@ function toCardData(j: Job): JobCardData {
   };
 }
 
-export function JobsTab({ onViewApplication, onMatchAll, onStopMatchAll, matching, canStop, matchProgress, reloadKey, totalScoredJobs }: {
+function toMatch(j: Job): Match | null {
+  if (j.score == null || !j.resume_id) return null;
+  return {
+    job_id: j.id,
+    resume_id: j.resume_id,
+    resume_label: j.resume_label ?? "",
+    job_title: j.title,
+    company: j.company,
+    apply_url: j.apply_url,
+    source: j.source,
+    location: j.location,
+    remote: j.remote,
+    work_mode: j.work_mode,
+    key_skills: j.key_skills,
+    posted_at: j.posted_at,
+    fetched_at: j.fetched_at,
+    score: j.score,
+    reasoning: j.reasoning ?? "",
+    missing_skills: j.missing_skills ?? [],
+    selling_points: j.selling_points ?? [],
+    applied: j.applied,
+    apply_status: j.apply_status,
+    application_id: j.application_id,
+    reviewed_at: j.fetched_at,
+  };
+}
+
+export function JobsTab({ onViewApplication, onMatchAll, onMatchSelected, onStopMatchAll, matching, canStop, matchProgress, reloadKey, totalScoredJobs }: {
   onViewApplication: (applicationId: string) => void;
   onMatchAll: () => void;
+  onMatchSelected: (jobIds: string[]) => void;
   onStopMatchAll: () => void;
   matching: boolean;
   canStop: boolean;
@@ -39,6 +69,8 @@ export function JobsTab({ onViewApplication, onMatchAll, onStopMatchAll, matchin
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [selectedMatch, setSelectedMatch] = useState<Match | null>(null);
 
   const loadPage = useCallback(async (sourceFilter: string, sortBy: "fetched" | "score", offset: number) => {
     return getJobs({
@@ -56,6 +88,8 @@ export function JobsTab({ onViewApplication, onMatchAll, onStopMatchAll, matchin
       .finally(() => setLoading(false));
   }, [source, sort, loadPage, reloadKey]);
 
+  useEffect(() => { setSelected(new Set()); }, [source, sort, reloadKey]);
+
   async function handleLoadMore() {
     setLoadingMore(true);
     try {
@@ -67,8 +101,26 @@ export function JobsTab({ onViewApplication, onMatchAll, onStopMatchAll, matchin
     }
   }
 
+  function toggleSelect(jobId: string) {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(jobId)) next.delete(jobId); else next.add(jobId);
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    setSelected(prev => prev.size === jobs.length ? new Set() : new Set(jobs.map(j => j.id)));
+  }
+
+  function handleCardClick(j: Job) {
+    const match = toMatch(j);
+    if (match) setSelectedMatch(match);
+  }
+
   const sources = ["all", "adzuna", "remotive", "remoteok", "jobicy", "arbeitnow", "greenhouse", "lever"];
   const hasMore = jobs.length < total;
+  const allSelected = jobs.length > 0 && selected.size === jobs.length;
 
   return (
     <div className="flex flex-col gap-6">
@@ -95,11 +147,30 @@ export function JobsTab({ onViewApplication, onMatchAll, onStopMatchAll, matchin
           {matching ? "Matching…" : "Match unmatched"}
         </button>
 
+        {selected.size > 0 && (
+          <button
+            onClick={() => onMatchSelected(Array.from(selected))}
+            disabled={matching}
+            className="text-xs font-semibold px-3.5 py-1.5 rounded-full bg-ink text-paper hover:bg-ink/85 disabled:opacity-50 transition-colors whitespace-nowrap"
+          >
+            Match {selected.size} selected
+          </button>
+        )}
+
         <span className="text-xs text-muted whitespace-nowrap">
           {totalScoredJobs} matched total
         </span>
 
         <div className="ml-auto flex items-center gap-3">
+          <label className="flex items-center gap-1.5 text-xs font-medium text-muted cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={allSelected}
+              onChange={toggleSelectAll}
+              className="w-4 h-4 rounded border-border accent-accent cursor-pointer"
+            />
+            Select all
+          </label>
           <div className="flex items-center gap-1 bg-panel rounded-full p-1">
             {(["fetched", "score"] as const).map(s => (
               <button
@@ -166,7 +237,15 @@ export function JobsTab({ onViewApplication, onMatchAll, onStopMatchAll, matchin
         <>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-5">
             {jobs.map((j, i) => (
-              <JobCard key={i} job={toCardData(j)} onViewApplication={onViewApplication} />
+              <JobCard
+                key={i}
+                job={toCardData(j)}
+                onClick={j.score != null ? () => handleCardClick(j) : undefined}
+                onViewApplication={onViewApplication}
+                selectable
+                selected={selected.has(j.id)}
+                onToggleSelect={toggleSelect}
+              />
             ))}
           </div>
 
@@ -182,6 +261,15 @@ export function JobsTab({ onViewApplication, onMatchAll, onStopMatchAll, matchin
             </div>
           )}
         </>
+      )}
+
+      {selectedMatch && (
+        <MatchDrawer
+          match={selectedMatch}
+          onClose={() => setSelectedMatch(null)}
+          onApplied={() => setSelectedMatch(null)}
+          onViewApplication={onViewApplication}
+        />
       )}
     </div>
   );

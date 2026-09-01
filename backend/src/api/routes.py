@@ -1,6 +1,7 @@
 """
 FastAPI routes: resumes, jobs, matches, applications, pipeline trigger.
 """
+import concurrent.futures
 import logging
 import os
 import shutil
@@ -17,6 +18,7 @@ from ..matching.engine import process_jobs_for_matching, SCORE_THRESHOLD
 from ..matching.profile import extract_profile
 from ..applying.applicator import run_applications, generate_cover_letter
 
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s [%(name)s] %(message)s")
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="JobBot API", version="1.0.0")
@@ -146,12 +148,17 @@ def list_jobs(
         results.append({
             "id": str(j.id), "title": j.title, "company": j.company,
             "source": j.source, "location": j.location, "remote": j.remote,
-            "work_mode": j.work_mode,
+            "work_mode": j.work_mode, "key_skills": j.key_skills,
             "apply_url": j.apply_url, "fetched_at": j.fetched_at, "posted_at": j.posted_at,
             "applied": applied is not None,
             "application_id": str(applied.id) if applied else None,
             "score": round(best_match.score, 3) if best_match else None,
+            "resume_id": str(best_match.resume_id) if best_match else None,
             "resume_label": best_match.resume.label if best_match and best_match.resume else None,
+            "reasoning": best_match.reasoning if best_match else None,
+            "missing_skills": best_match.missing_skills if best_match else None,
+            "selling_points": best_match.selling_points if best_match else None,
+            "apply_status": applied.status if applied else None,
         })
     return {"items": results, "total": total}
 
@@ -161,23 +168,28 @@ def match_all_jobs(
     background_tasks: BackgroundTasks,
     source: str = None,
     only_unmatched: bool = True,
+    job_ids: str = None,  # comma-separated UUIDs — if given, scopes matching to exactly these jobs
     db: Session = Depends(get_db),
 ):
     """
     Score jobs against the primary active resume.
     By default only scores jobs with no existing match; pass only_unmatched=false
     to force a full re-score (e.g. after updating your resume).
+    If job_ids is given, only those specific jobs are (re-)scored, ignoring
+    source/only_unmatched.
     """
     resumes = db.query(Resume).filter_by(user_id=USER_ID, active=True).all()
     if not resumes:
         raise HTTPException(400, "No active resumes to match against")
+
+    id_list = [j.strip() for j in job_ids.split(",")] if job_ids else None
 
     log = IngestionLog(status="matching", source=source or "all", run_type="match_all")
     db.add(log)
     db.commit()
     log_id = log.id
 
-    background_tasks.add_task(_run_match_all, log_id, source, only_unmatched)
+    background_tasks.add_task(_run_match_all, log_id, source, only_unmatched, id_list)
     return {"message": "Matching started in background", "log_id": str(log_id)}
 
 
@@ -199,7 +211,38 @@ def stop_match_all(log_id: UUID, db: Session = Depends(get_db)):
     return {"message": "Stop requested — will halt after the current job"}
 
 
-def _run_match_all(log_id, source: str = None, only_unmatched: bool = True):
+MATCH_ALL_CONCURRENCY = int(os.getenv("MATCH_ALL_CONCURRENCY", "4"))
+
+
+def _match_one_job(log_id, job_id, resume_id):
+    """
+    Score a single job against one resume in its own DB session — run inside
+    a thread pool, so each worker needs an independent session (SQLAlchemy
+    sessions are not thread-safe to share).
+    """
+    db = get_session()
+    try:
+        job = db.query(Job).filter_by(id=job_id).first()
+        resume = db.query(Resume).filter_by(id=resume_id).first()
+        if not job or not resume:
+            return
+        process_jobs_for_matching([job], [resume], db)
+    except Exception as e:
+        logger.error(f"Match failed for job {job_id}: {e}")
+    finally:
+        db.close()
+
+
+def _is_stopping(log_id) -> bool:
+    db = get_session()
+    try:
+        status = db.query(IngestionLog.status).filter_by(id=log_id).scalar()
+        return status == "stopping"
+    finally:
+        db.close()
+
+
+def _run_match_all(log_id, source: str = None, only_unmatched: bool = True, job_ids: list[str] = None):
     db = get_session()
     try:
         log = db.query(IngestionLog).filter_by(id=log_id).first()
@@ -213,49 +256,73 @@ def _run_match_all(log_id, source: str = None, only_unmatched: bool = True):
         # Score against the primary (most recently uploaded) resume only —
         # scoring every job against every resume was the main cost driver.
         primary_resume = max(resumes, key=lambda r: r.created_at)
-        resumes = [primary_resume]
+        resume_id = primary_resume.id
 
-        q = db.query(Job).filter_by(expired=False)
-        if source:
-            q = q.filter_by(source=source)
-        if only_unmatched:
-            matched_job_ids = db.query(JobMatch.job_id).distinct()
-            q = q.filter(~Job.id.in_(matched_job_ids))
-        jobs = q.all()
+        if job_ids:
+            jobs = db.query(Job).filter(Job.id.in_(job_ids)).all()
+        else:
+            q = db.query(Job).filter_by(expired=False)
+            if source:
+                q = q.filter_by(source=source)
+            if only_unmatched:
+                matched_job_ids = db.query(JobMatch.job_id).distinct()
+                q = q.filter(~Job.id.in_(matched_job_ids))
+            jobs = q.all()
 
-        log.jobs_found = len(jobs)
+        job_ids_to_run = [j.id for j in jobs]
+        log.jobs_found = len(job_ids_to_run)
         db.commit()
+        db.close()  # this session is done — workers each open their own
 
-        for i, job in enumerate(jobs, start=1):
-            # Cooperative cancellation: check before each job whether this run
-            # was asked to stop (e.g. via POST /jobs/match-all/{log_id}/stop).
-            db.refresh(log)
-            if log.status == "stopping":
-                log.status = "stopped"
-                db.commit()
-                logger.info(f"Match run {log_id} stopped by request at {i - 1}/{len(jobs)}")
-                return
+        completed = 0
+        stopped = False
+        with concurrent.futures.ThreadPoolExecutor(max_workers=MATCH_ALL_CONCURRENCY) as executor:
+            futures = {
+                executor.submit(_match_one_job, log_id, jid, resume_id): jid
+                for jid in job_ids_to_run
+            }
+            for future in concurrent.futures.as_completed(futures):
+                future.result()  # surface any unexpected exception
+                completed += 1
 
-            try:
-                process_jobs_for_matching([job], resumes, db)
-            except Exception as e:
-                logger.error(f"Match failed for job {job.id}: {e}")
-            # Count jobs actually processed (attempted), not jobs successfully
-            # scored — a job already applied to is skipped inside
-            # process_jobs_for_matching with zero LLM calls, but it has still
-            # been "handled" for the purposes of this run's progress.
-            log.matches_found = i
-            db.commit()
+                # Cooperative cancellation: check every few completions
+                # (not every single one) whether the run was asked to stop.
+                if completed % MATCH_ALL_CONCURRENCY == 0 and _is_stopping(log_id):
+                    stopped = True
 
-        log.status = "done"
-        db.commit()
+                progress_db = get_session()
+                try:
+                    progress_db.query(IngestionLog).filter_by(id=log_id).update({"matches_found": completed})
+                    progress_db.commit()
+                finally:
+                    progress_db.close()
+
+                if stopped:
+                    for f in futures:
+                        f.cancel()
+                    break
+
+        final_db = get_session()
+        try:
+            final_log = final_db.query(IngestionLog).filter_by(id=log_id).first()
+            if stopped:
+                final_log.status = "stopped"
+                logger.info(f"Match run {log_id} stopped by request at {completed}/{len(job_ids_to_run)}")
+            else:
+                final_log.status = "done"
+            final_db.commit()
+        finally:
+            final_db.close()
     except Exception as e:
-        log.status = "failed"
-        log.error = str(e)
-        db.commit()
+        fail_db = get_session()
+        try:
+            fail_log = fail_db.query(IngestionLog).filter_by(id=log_id).first()
+            fail_log.status = "failed"
+            fail_log.error = str(e)
+            fail_db.commit()
+        finally:
+            fail_db.close()
         raise
-    finally:
-        db.close()
 
 
 # ─────────────────────────────────────────────
@@ -290,6 +357,7 @@ def list_matches(
             "location":      m.job.location if m.job else None,
             "remote":        m.job.remote if m.job else False,
             "work_mode":     m.job.work_mode if m.job else None,
+            "key_skills":    m.job.key_skills if m.job else None,
             "posted_at":     m.job.posted_at if m.job else None,
             "fetched_at":    m.job.fetched_at if m.job else None,
             "score":         round(m.score, 3),

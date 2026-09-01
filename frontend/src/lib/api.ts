@@ -31,10 +31,11 @@ export async function uploadResume(file: File, label: string): Promise<Resume> {
 export type WorkMode = "remote" | "hybrid" | "onsite" | null;
 export type Job = {
   id: string; title: string; company: string; source: string;
-  location: string; remote: boolean; work_mode: WorkMode; apply_url: string;
+  location: string; remote: boolean; work_mode: WorkMode; key_skills: string[] | null; apply_url: string;
   fetched_at: string; posted_at: string | null;
-  applied: boolean; application_id: string | null;
-  score: number | null; resume_label: string | null;
+  applied: boolean; application_id: string | null; apply_status: string | null;
+  score: number | null; resume_id: string | null; resume_label: string | null;
+  reasoning: string | null; missing_skills: string[] | null; selling_points: string[] | null;
 };
 export type JobsPage = { items: Job[]; total: number };
 export const getJobs = (opts?: { source?: string; limit?: number; offset?: number; sort?: "fetched" | "score" }) => {
@@ -48,6 +49,8 @@ export const getJobs = (opts?: { source?: string; limit?: number; offset?: numbe
 };
 export const matchAllJobs = (source?: string) =>
   req<{ message: string; log_id: string }>(`/jobs/match-all${source ? `?source=${source}` : ""}`, { method: "POST" });
+export const matchSelectedJobs = (jobIds: string[]) =>
+  req<{ message: string; log_id: string }>(`/jobs/match-all?job_ids=${jobIds.join(",")}`, { method: "POST" });
 export const stopMatchAll = (logId: string) =>
   req<{ message: string }>(`/jobs/match-all/${logId}/stop`, { method: "POST" });
 
@@ -55,7 +58,7 @@ export const stopMatchAll = (logId: string) =>
 export type Match = {
   job_id: string; resume_id: string; resume_label: string;
   job_title: string; company: string; apply_url: string; source: string;
-  location: string | null; remote: boolean; work_mode: WorkMode;
+  location: string | null; remote: boolean; work_mode: WorkMode; key_skills: string[] | null;
   posted_at: string | null; fetched_at: string | null; score: number;
   reasoning: string; missing_skills: string[]; selling_points: string[];
   applied: boolean; apply_status: string | null; application_id: string | null; reviewed_at: string;

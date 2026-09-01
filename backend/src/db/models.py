@@ -60,6 +60,7 @@ class Job(Base):
     location    = Column(String(255))
     remote      = Column(Boolean, default=False)
     work_mode   = Column(String(20))  # remote|hybrid|onsite — derived by the LLM during matching
+    key_skills  = Column(ARRAY(Text))  # job's own top required skills, derived by the LLM during matching
     salary_min  = Column(Float)
     salary_max  = Column(Float)
     apply_url   = Column(String(1000), nullable=False)
