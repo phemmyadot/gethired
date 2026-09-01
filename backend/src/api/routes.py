@@ -5,6 +5,7 @@ import concurrent.futures
 import logging
 import os
 import shutil
+import threading
 from uuid import UUID
 from fastapi import FastAPI, UploadFile, File, Form, Depends, HTTPException, BackgroundTasks, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -32,7 +33,6 @@ app.add_middleware(
 )
 
 UPLOAD_DIR = os.getenv("RESUME_UPLOAD_DIR", "/tmp/jobbot_resumes")
-AUTO_APPLY_ENABLED = os.getenv("AUTO_APPLY_ENABLED", "false").lower() == "true"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 USER_ID = "00000000-0000-0000-0000-000000000001"  # single-user for MVP
@@ -163,6 +163,28 @@ def list_jobs(
     return {"items": results, "total": total}
 
 
+def _start_match_all(
+    background_tasks: BackgroundTasks,
+    db: Session,
+    source: str = None,
+    only_unmatched: bool = True,
+    job_ids: list[str] = None,
+) -> UUID:
+    """
+    Create the tracking log row and schedule a match-all background run.
+    Shared by the manual /jobs/match-all endpoint and the automatic
+    ingest-then-match handoff, so matching is always independently tracked
+    and independently resumable/stoppable regardless of how it was triggered.
+    """
+    log = IngestionLog(status="matching", source=source or "all", run_type="match_all")
+    db.add(log)
+    db.commit()
+    log_id = log.id
+
+    background_tasks.add_task(_run_match_all, log_id, source, only_unmatched, job_ids)
+    return log_id
+
+
 @app.post("/jobs/match-all")
 def match_all_jobs(
     background_tasks: BackgroundTasks,
@@ -183,13 +205,7 @@ def match_all_jobs(
         raise HTTPException(400, "No active resumes to match against")
 
     id_list = [j.strip() for j in job_ids.split(",")] if job_ids else None
-
-    log = IngestionLog(status="matching", source=source or "all", run_type="match_all")
-    db.add(log)
-    db.commit()
-    log_id = log.id
-
-    background_tasks.add_task(_run_match_all, log_id, source, only_unmatched, id_list)
+    log_id = _start_match_all(background_tasks, db, source, only_unmatched, id_list)
     return {"message": "Matching started in background", "log_id": str(log_id)}
 
 
@@ -514,7 +530,14 @@ def pipeline_status_by_id(log_id: UUID, response: Response, db: Session = Depend
 
 
 def _run_full_pipeline():
-    """Full pipeline: ingest → match → apply."""
+    """
+    Ingestion only. Matching is intentionally NOT run inline here — it's
+    kicked off as its own independently-tracked background run once ingestion
+    completes, so a matching/LLM failure can never mark a successful
+    ingestion run as failed, and vice versa. Rematching an already-ingested
+    backlog is already fully supported (POST /jobs/match-all), so ingestion
+    has nothing to lose by not waiting on matching to succeed.
+    """
     db = get_session()
     log = IngestionLog(status="running")
     db.add(log)
@@ -554,24 +577,11 @@ def _run_full_pipeline():
         log.status = "ingesting"
         db.commit()
         new_jobs = run_ingestion(db, prefs=prefs, log=log)
-        if not new_jobs:
-            log.status = "done"
-            db.commit()
-            return
-
-        log.status = "matching"
-        db.commit()
-        candidates = process_jobs_for_matching(new_jobs, resumes, db)
-        log.matches_found = len(candidates)
-        db.commit()
-
-        if candidates and AUTO_APPLY_ENABLED:
-            log.status = "applying"
-            db.commit()
-            run_applications(candidates, db)
-
         log.status = "done"
         db.commit()
+
+        if new_jobs:
+            _kick_off_match_all()
     except Exception as e:
         log.status = "failed"
         log.error = str(e)
@@ -579,6 +589,29 @@ def _run_full_pipeline():
         raise
     finally:
         db.close()
+
+
+def _kick_off_match_all():
+    """
+    Start an independent match-all run (own IngestionLog row, own thread) for
+    newly-ingested jobs. Runs fire-and-forget on its own thread so ingestion's
+    background task returns immediately regardless of how long matching
+    takes or whether it ultimately succeeds.
+    """
+    match_db = get_session()
+    try:
+        match_log = IngestionLog(status="matching", source="all", run_type="match_all")
+        match_db.add(match_log)
+        match_db.commit()
+        match_log_id = match_log.id
+    finally:
+        match_db.close()
+
+    threading.Thread(
+        target=_run_match_all,
+        args=(match_log_id, None, True, None),
+        daemon=True,
+    ).start()
 
 
 # ─────────────────────────────────────────────
