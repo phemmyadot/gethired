@@ -54,9 +54,12 @@ or "Node.js") does NOT mean the candidate is qualified for a different disciplin
 
 First, identify the job's core discipline (e.g. mobile engineering, backend/API engineering, data
 engineering, sales, DevOps, ML engineering) and the resume's primary discipline from its actual
-work history. If they differ, cap required_skills_pct and domain_fit_pct at 35 regardless of any
-shared tools or languages — only go higher if the resume's actual day-to-day work matches the
-job's actual day-to-day work.
+work history. If they differ, cap required_skills_pct, domain_fit_pct, AND experience_years_pct
+ALL at 25 regardless of any shared tools, languages, or years of seniority — years of experience
+in a DIFFERENT discipline do not count toward this role. Only go higher on these three than 25 if
+the resume's actual day-to-day work matches the job's actual day-to-day work. Do NOT let a high
+seniority_fit_pct or seniority title compensate for a discipline mismatch — a senior mobile
+engineer applying to a senior backend role is still a mismatch, just at a senior level.
 
 For required_skills_pct: only count a required skill as demonstrated if the resume shows it was
 used hands-on for similar work, not just listed or mentioned in passing. A resume matching 0-1 of
@@ -67,10 +70,10 @@ Rate FOUR sub-factors on a 0-100 scale:
 1. required_skills_pct (0-100): % of the job's explicitly required skills/tools genuinely
    demonstrated in the resume (see rule above).
 2. experience_years_pct (0-100): enough relevant years IN THIS DISCIPLINE (not just total years
-   in tech)? 100 = meets or exceeds.
+   in tech)? 100 = meets or exceeds. Capped at 25 if discipline mismatch (see above).
 3. domain_fit_pct (0-100): per the discipline check above.
-4. seniority_fit_pct (0-100): does seniority level match (not over/under-qualified)? Level only,
-   not discipline fit.
+4. seniority_fit_pct (0-100): does seniority LEVEL match (not over/under-qualified)? This is the
+   only sub-factor NOT capped by discipline mismatch — it reflects level only.
 
 RESUME LABEL: {label}
 RESUME:
@@ -98,7 +101,12 @@ Respond ONLY with valid JSON — no markdown, no preamble:
 
 key_skills: the job posting's own top required skills/tools/technologies, independent of this
   resume (max 6) — this describes what the JOB wants, not how well the candidate matches it
-missing_skills: skills in job description not evident in resume (max 5)
+missing_skills: skills/tools THE JOB REQUIRES that are NOT present anywhere in the resume (max 5).
+  Every entry must be a skill named or clearly implied by the JOB DESCRIPTION. NEVER list a skill
+  the resume has just because the job doesn't need it — that is backwards and wrong. Example: if
+  the job needs "Web components, Design system" and the resume shows "React Native, Expo" instead,
+  missing_skills = ["Web components", "Design system"] — NOT "React Native" or "Expo", since those
+  aren't required by the job at all, they're just what the resume happens to have instead.
 selling_points: strongest resume points for this role (max 4) — omit if disciplines don't match
 seniority_fit: is this role a good level match?
 recommended_resume: true if this is likely the best resume to use
