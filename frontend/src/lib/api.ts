@@ -94,6 +94,7 @@ export const triggerPipeline = () =>
 
 export type PipelineStatus = {
   id: string;
+  run_type: "pipeline" | "match_all";
   status: "running" | "ingesting" | "matching" | "applying" | "stopping" | "stopped" | "done" | "failed";
   jobs_found: number; jobs_new: number; jobs_duped: number;
   matches_found: number; error: string | null; ran_at: string;

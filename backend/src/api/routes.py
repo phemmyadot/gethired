@@ -172,7 +172,7 @@ def match_all_jobs(
     if not resumes:
         raise HTTPException(400, "No active resumes to match against")
 
-    log = IngestionLog(status="matching", source=source or "all")
+    log = IngestionLog(status="matching", source=source or "all", run_type="match_all")
     db.add(log)
     db.commit()
     log_id = log.id
@@ -410,6 +410,7 @@ def trigger_pipeline(
 def _serialize_log(log: IngestionLog) -> dict:
     return {
         "id":            str(log.id),
+        "run_type":      log.run_type or "pipeline",
         "status":        log.status,
         "jobs_found":    log.jobs_found,
         "jobs_new":      log.jobs_new,

@@ -115,7 +115,12 @@ export default function Home() {
     getPipelineStatus().then(status => {
       if (status && IN_PROGRESS_STATUSES.includes(status.status)) {
         setPipelineStatus(status);
-        pollStatus(() => getRunStatus(status.id), () => { load(); setJobsVersion(v => v + 1); });
+        if (status.run_type === "match_all") setMatchAllLogId(status.id);
+        pollStatus(() => getRunStatus(status.id), () => {
+          load();
+          setJobsVersion(v => v + 1);
+          setMatchAllLogId(null);
+        });
       }
     }).catch(() => {});
   }, [pollStatus, load]);
@@ -193,7 +198,7 @@ export default function Home() {
               onMatchAll={handleMatchAll}
               onStopMatchAll={handleStopMatchAll}
               matching={pipelineRunning || (pipelineStatus != null && IN_PROGRESS_STATUSES.includes(pipelineStatus.status))}
-              canStop={matchAllLogId != null && pipelineStatus?.status === "matching"}
+              canStop={matchAllLogId != null && pipelineStatus?.run_type === "match_all" && IN_PROGRESS_STATUSES.includes(pipelineStatus.status)}
               matchProgress={pipelineStatus}
               reloadKey={jobsVersion}
               totalScoredJobs={stats?.total_scored_jobs ?? 0}
