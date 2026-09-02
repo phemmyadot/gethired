@@ -7,6 +7,7 @@ import logging
 import re
 import time
 import concurrent.futures
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from ..db.models import Job, Resume, JobMatch, AppliedJob
@@ -43,10 +44,12 @@ def parse_llm_json_response(raw_output) -> dict:
         return raw_output
     elif isinstance(raw_output, str):
         formatted = raw_output.strip()
+        formatted = re.sub(r"^```(?:json)?\s*|\s*```$", "", formatted, flags=re.IGNORECASE)
         if not formatted.startswith("{"):
-            formatted = "{" + formatted
+            opening_brace = formatted.find("{")
+            formatted = formatted[opening_brace:] if opening_brace >= 0 else "{" + formatted
         formatted = re.sub(r',\s*([\}\]])', r'\1', formatted)
-        return json.loads(formatted)
+        return json.JSONDecoder().raw_decode(formatted)[0]
     else:
         raise TypeError(f"Expected dict or str, got {type(raw_output)}")
 
@@ -70,6 +73,27 @@ def normalize_selling_points(value) -> list[str]:
     return []
 
 
+class EvaluationResponse(BaseModel):
+    """Validated shape persisted by the matching pipeline."""
+    model_config = ConfigDict(extra="ignore")
+
+    job_discipline: str = ""
+    resume_discipline: str = ""
+    discipline_match: bool = True
+    scope_mismatch: bool = False
+    discipline_and_scope_analysis: str = ""
+    required_skills_pct: float = Field(default=0, ge=0, le=100)
+    experience_years_pct: float = Field(default=0, ge=0, le=100)
+    domain_fit_pct: float = Field(default=0, ge=0, le=100)
+    seniority_fit_pct: float = Field(default=0, ge=0, le=100)
+    key_skills: list[str] = Field(default_factory=list)
+    missing_skills: list[str] = Field(default_factory=list)
+    selling_points: list[str] = Field(default_factory=list)
+    seniority_fit: str = "unknown"
+    recommended_resume: bool = False
+    reasoning: str = ""
+
+
 def calculate_final_score(eval_result: dict) -> float:
     """Calculate the final match score with discipline and scope safeguards."""
     if not eval_result.get("discipline_match", True) or eval_result.get("scope_mismatch", False):
@@ -86,6 +110,96 @@ def calculate_final_score(eval_result: dict) -> float:
         for key, weight in weights.items()
     )
     return round(score, 2)
+
+
+def sanitize_selling_points(job_description: str, selling_points: list[str]) -> list[str]:
+    """Keep selling points tied to the target job instead of generic resume strengths."""
+    jd_lower = job_description.lower()
+    mobile_keywords = ("react native", "mobile", "ios", "android", "swift", "kotlin")
+    has_keyword = lambda text, term: bool(re.search(rf"\b{re.escape(term)}\b", text))
+    mobile_requested = any(has_keyword(jd_lower, term) for term in mobile_keywords)
+    return [
+        point for point in selling_points
+        if not (
+            any(has_keyword(str(point).lower(), term) for term in (*mobile_keywords, "expo"))
+            and not mobile_requested
+        )
+    ]
+
+
+def sanitize_evaluation_output(job_description: str, eval_json: dict) -> dict:
+    """Remove mobile and frontend highlights absent from the target JD."""
+    jd_lower = job_description.lower()
+    has_alias = lambda text, alias: bool(re.search(rf"\b{re.escape(alias)}\b", text))
+    irrelevant_if_missing = {
+        "react native": ("react native", "mobile app", "mobile development"),
+        "expo": ("expo",),
+        "flutter": ("flutter",),
+        "ios": ("ios", "swift", "objective-c"),
+        "android": ("android", "kotlin"),
+    }
+    cleaned_points = []
+    for point in eval_json.get("selling_points", []):
+        point_lower = str(point).lower()
+        if any(
+            any(has_alias(point_lower, alias) for alias in aliases)
+            and not any(has_alias(jd_lower, alias) for alias in aliases)
+            for aliases in irrelevant_if_missing.values()
+        ):
+            continue
+        cleaned_points.append(point)
+    eval_json["selling_points"] = cleaned_points
+    return eval_json
+
+
+def validate_and_clean_eval(resume_text: str, eval_result: dict, job_text: str = "") -> dict:
+    """Remove reported gaps that are demonstrably present in the resume."""
+    resume_lower = resume_text.lower()
+    job_lower = job_text.lower()
+    cleaned_missing = []
+    for skill in eval_result.get("missing_skills", []):
+        if not isinstance(skill, str):
+            continue
+        skill_lower = skill.lower().strip()
+        components = [
+            component for component in re.findall(r"[a-z0-9+#]+", skill_lower)
+            if len(component) > 2
+        ]
+        present = skill_lower in resume_lower or (
+            len(components) >= 2
+            and all(re.search(rf"\b{re.escape(component)}\b", resume_lower) for component in components)
+        )
+        if not present:
+            cleaned_missing.append(skill)
+    eval_result["missing_skills"] = cleaned_missing
+
+    role_is_solutions = bool(re.search(
+        r"\b(solutions architect|pre-sales|presales|field engineer)\b", job_lower
+    ))
+    has_customer_sales = bool(re.search(
+        r"\b(pre-sales|presales|technical sales|whiteboard|customer architecture|account growth|quota|sales engineer)\b",
+        resume_lower,
+    ))
+    if role_is_solutions and not has_customer_sales:
+        eval_result["domain_fit_pct"] = min(eval_result.get("domain_fit_pct", 0), 50)
+        if "Technical Pre-Sales / Customer Architecture Experience" not in cleaned_missing:
+            cleaned_missing.append("Technical Pre-Sales / Customer Architecture Experience")
+        eval_result["missing_skills"] = cleaned_missing
+
+    eval_result = sanitize_evaluation_output(job_text, eval_result)
+    eval_result["selling_points"] = sanitize_selling_points(
+        job_text, eval_result.get("selling_points", [])
+    )
+
+    job_discipline = eval_result.get("job_discipline", "").lower()
+    resume_discipline = eval_result.get("resume_discipline", "").lower()
+    engineering_terms = ("software", "engineering", "frontend", "backend", "full-stack", "developer")
+    if any(term in job_discipline for term in engineering_terms) and any(
+        term in resume_discipline for term in engineering_terms
+    ):
+        eval_result["discipline_match"] = True
+        eval_result["scope_mismatch"] = False
+    return eval_result
 
 def detect_work_mode(job: dict) -> str:
     """Classify a job's work mode via the LLM. One call per job, not per resume."""
@@ -133,6 +247,9 @@ SKILL-MATCHING & SEARCH RULES:
 - DIRECTIONAL GAP CHECK: missing_skills means required skills present in the
     JOB DESCRIPTION but absent from the CANDIDATE RESUME. Never list skills
     the candidate has when the job does not require them.
+- OWNERSHIP RULES: key_skills are required by the job and possessed by the
+    candidate. missing_skills are required by the job and totally absent from
+    the candidate resume. Never put resume skills into missing_skills.
 - KEEP SCOPE ACCURATE: Do not mention Mobile, React Native, or mobile apps
     unless the job description explicitly requires iOS, Android, React Native,
     or mobile development. For backend/systems roles, focus on the stated
@@ -141,6 +258,15 @@ SKILL-MATCHING & SEARCH RULES:
 - EVIDENCE ONLY: selling_points may mention only overlap between an explicit
     job requirement and evidence in the resume. Do not call generic full-stack
     or mobile experience a match for an unstated requirement.
+- SOLUTIONS ARCHITECT / PRE-SALES: For roles containing Solutions Architect,
+    Pre-Sales, or Field Engineer, check specifically for customer architecture
+    reviews, whiteboarding, technical sales, account growth, or similar
+    customer-facing evidence. If absent from the resume, set domain_fit_pct to
+    50 or less and include "Technical Pre-Sales / Customer Architecture
+    Experience" in missing_skills.
+- CLOUD ROLE RELEVANCE: Never use React Native, mobile, iOS, Android, or Expo
+    as a selling point for cloud, infrastructure, AWS, Azure, GCP, or
+    Databricks roles unless the job explicitly requires mobile development.
 - EQUIVALENCY RULE: Do NOT list a skill as "missing" if the candidate demonstrates equivalent technology:
   * AWS / Azure / GCP = Cloud Infrastructure
   * React Native / React / Vue / Angular = Frontend UI
@@ -179,12 +305,11 @@ def score_one(resume: dict, job: dict) -> dict:
     """Synchronously score one resume against one job via Claude."""
     prompt = SCORE_PROMPT.format(
         label=resume["label"],
-        resume_content=resume["content"][:2500],  # token budget — local models are latency-sensitive to input size
+        resume_content=resume["content"][:2500],
         title=job["title"],
         company=job["company"],
         description=job["description"][:1800],
     )
-
     try:
         raw = generate_text(prompt, model=_local_llm_scoring_model())
 
@@ -204,7 +329,14 @@ def score_one(resume: dict, job: dict) -> dict:
         else:
             raise TypeError(f"Unexpected response type from generate_text: {type(raw)}")
 
-        result["selling_points"] = normalize_selling_points(result.get("selling_points"))
+        for field in ("key_skills", "missing_skills", "selling_points"):
+            result[field] = normalize_selling_points(result.get(field))
+        result = validate_and_clean_eval(
+            resume["content"],
+            result,
+            f"{job['title']} {job['description']}",
+        )
+        result = EvaluationResponse.model_validate(result).model_dump()
 
         sub_scores = {
             "required_skills_pct": result.get("required_skills_pct"),

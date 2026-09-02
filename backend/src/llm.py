@@ -85,13 +85,17 @@ discipline_and_scope_analysis, required_skills_pct, experience_years_pct,
 domain_fit_pct, seniority_fit_pct, key_skills, missing_skills,
 selling_points, seniority_fit, recommended_resume, reasoning.
 
-key_skills must contain only concrete skills, technologies, or domains found
-in the current job description. missing_skills must contain only explicit job
-requirements not demonstrated in the resume. selling_points must describe
-specific evidence of overlap and must not claim that a resume skill matches a
-requirement that the job description does not state. All three fields must be
-JSON arrays of strings. Use only evidence from the current job description and
-resume.
+CRITICAL SKILL OWNERSHIP:
+1. key_skills are skills required by the job that the candidate actually
+    possesses. They must be concrete requirements from the current job.
+2. missing_skills are skills required by the job that are totally absent from
+    the candidate resume. Never place a resume skill in missing_skills.
+3. selling_points are a list of 2 to 4 candidate qualifications from the
+    resume that directly fulfill specific requirements in this job description.
+    Never include unrelated candidate skills such as React Native, Expo, or
+    mobile development unless this job explicitly requests them.
+All three fields must be JSON arrays of strings. Use only evidence from the
+current job description and resume.
 """
 
 
