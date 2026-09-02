@@ -127,6 +127,17 @@ REASONING RULES:
 2. Focus strictly on skills explicitly listed under REQUIRED QUALIFICATIONS in the job description.
 
 SKILL-MATCHING & SEARCH RULES:
+- FIRST EXTRACT THE JOB: Identify its primary domain and explicit required
+    stack before considering the resume. key_skills must come from the job
+    description, not from the resume summary.
+- KEEP SCOPE ACCURATE: Do not mention Mobile, React Native, or mobile apps
+    unless the job description explicitly requires iOS, Android, React Native,
+    or mobile development. For backend/systems roles, focus on the stated
+    systems, APIs, storage, distributed systems, infrastructure, and latency
+    requirements.
+- EVIDENCE ONLY: selling_points may mention only overlap between an explicit
+    job requirement and evidence in the resume. Do not call generic full-stack
+    or mobile experience a match for an unstated requirement.
 - EQUIVALENCY RULE: Do NOT list a skill as "missing" if the candidate demonstrates equivalent technology:
   * AWS / Azure / GCP = Cloud Infrastructure
   * React Native / React / Vue / Angular = Frontend UI
@@ -134,12 +145,10 @@ SKILL-MATCHING & SEARCH RULES:
   * PostgreSQL / MySQL / MongoDB / CosmosDB = Databases
   * Docker / Kubernetes / CI/CD = DevOps & Deployment
 - NO HALLUCINATIONS: Do NOT list domain-specific tags (e.g., Robotics, ML, Computer Vision, Embedded) as "missing" UNLESS they are explicitly listed as mandatory requirements in the job description.
-- STRICT KEY SKILLS FORMAT: key_skills must be short skill/tool/technology NAMES ONLY (1-4 words each,
-  e.g. "React Native", "AWS", "CI/CD", "Kubernetes") — NEVER full sentences, responsibilities, or
-  bullet points copied from the job description. If the job description only lists responsibilities
-  and no explicit tech stack, INFER the underlying skill names implied by each responsibility (e.g.
-  "maintain internal web services" implies "Backend development"; "add observability" implies
-  "Observability tools") rather than copying the sentence verbatim. Extract exactly 4-6 of these.
+- STRICT KEY SKILLS FORMAT: key_skills must be short skill/tool/domain NAMES
+    ONLY (1-4 words each), taken from explicit job requirements. Never use
+    full sentences, resume-summary phrases, or skills absent from the job
+    description. Extract exactly 4-6 when the job provides that many.
 
 OUTPUT FORMAT:
 Output MUST be raw, valid JSON following this exact structure without markdown code blocks:

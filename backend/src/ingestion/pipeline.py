@@ -190,6 +190,13 @@ def _matches_resume_title(job: dict, prefs: dict) -> bool:
         return True
 
     job_title = job.get("title", "").lower()
+    non_engineering_terms = {
+        "advocate", "advocacy", "community", "recruiting", "recruiter",
+        "sales", "marketing", "support", "customer success", "relations",
+    }
+    if any(term in job_title for term in non_engineering_terms):
+        return any(term in profile_title for term in non_engineering_terms)
+
     equivalent_terms = set(title_terms)
     if "software" in equivalent_terms or "engineer" in equivalent_terms:
         equivalent_terms.update({

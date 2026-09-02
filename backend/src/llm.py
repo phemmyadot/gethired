@@ -69,14 +69,25 @@ If the disciplines or scope do not match, set discipline_match to false or
 scope_mismatch to true, and do not allow required_skills_pct, domain_fit_pct,
 or seniority_fit_pct to exceed 20.
 
+Extract the job's actual domain and required technology stack before comparing
+the resume. Keep backend/systems, web, and mobile scopes distinct. Never label
+a role as mobile or include React Native/mobile skills unless the job
+description explicitly requires iOS, Android, React Native, or mobile apps.
+Do not copy generic resume-summary phrases into the job skill fields.
+
 Return only valid JSON with these fields:
 job_discipline, resume_discipline, discipline_match, scope_mismatch,
 discipline_and_scope_analysis, required_skills_pct, experience_years_pct,
 domain_fit_pct, seniority_fit_pct, key_skills, missing_skills,
 selling_points, seniority_fit, recommended_resume, reasoning.
 
-key_skills, missing_skills, and selling_points must always be JSON arrays of
-strings. Use only evidence from the current job description and resume.
+key_skills must contain only concrete skills, technologies, or domains found
+in the current job description. missing_skills must contain only explicit job
+requirements not demonstrated in the resume. selling_points must describe
+specific evidence of overlap and must not claim that a resume skill matches a
+requirement that the job description does not state. All three fields must be
+JSON arrays of strings. Use only evidence from the current job description and
+resume.
 """
 
 
