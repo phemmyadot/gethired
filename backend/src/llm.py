@@ -1,11 +1,30 @@
+import json
 import logging
 import os
+import re
+import threading
 import time
 from typing import Any
 
 import httpx
 
 logger = logging.getLogger(__name__)
+_LOCAL_LLM_LOCK = threading.Lock()
+
+
+def _strip_reasoning_and_fences(text: str) -> str:
+    """
+    Reasoning models (e.g. deepseek-r1-distill-*) emit a <think>...</think>
+    block before the actual answer, sometimes inline in `content` rather than
+    in a separate `reasoning_content` field depending on the serving template.
+    Non-reasoning models sometimes wrap JSON in markdown code fences, or add
+    stray commentary before/after, despite being told not to. Extract the
+    first {...} object rather than relying on stripping specific wrappers,
+    since that's robust to whatever surrounds it.
+    """
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+    match = re.search(r"\{.*\}", text, flags=re.DOTALL)
+    return match.group(0) if match else text
 
 
 def _local_llm_base_url() -> str:
@@ -19,23 +38,81 @@ def _local_llm_model() -> str:
 def _local_llm_timeout() -> float:
     return float(os.getenv("LOCAL_LLM_TIMEOUT", "120"))
 
+def parse_prefilled_response(raw_assistant_content: str) -> dict:
+    # Prepend the pre-filled opening bracket to reconstruct complete JSON
+    full_json_str = "{" + raw_assistant_content.strip()
+    
+    # Sanitize any residual trailing commas before closing braces/brackets
+    sanitized_str = re.sub(r',\s*([\}\]])', r'\1', full_json_str)
+    
+    return json.loads(sanitized_str)
+
+def parse_prefilled_completion(content: str) -> dict:
+    """Reconstructs and parses JSON from an assistant response pre-filled with '</think>\\n{'."""
+    content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+    raw_str = content if content.startswith("{") else "{" + content
+    
+    # Clean up potential trailing commas prior to object/array closure
+    sanitized = re.sub(r',\s*([\}\]])', r'\1', raw_str)
+    
+    # Some local servers append trailing text or a second object.
+    return json.JSONDecoder().raw_decode(sanitized.lstrip())[0]
+
+SYSTEM_PROMPT = """
+You are an expert technical recruiter and candidate matcher. Evaluate only the
+job description and candidate resume supplied in the current user message.
+Never reuse, infer, or copy details from another job, candidate, or example.
+
+Identify the job's primary functional discipline and the resume's primary
+discipline. Ignore the employer's industry when it is unrelated to the role.
+If the disciplines or scope do not match, set discipline_match to false or
+scope_mismatch to true, and do not allow required_skills_pct, domain_fit_pct,
+or seniority_fit_pct to exceed 20.
+
+Return only valid JSON with these fields:
+job_discipline, resume_discipline, discipline_match, scope_mismatch,
+discipline_and_scope_analysis, required_skills_pct, experience_years_pct,
+domain_fit_pct, seniority_fit_pct, key_skills, missing_skills,
+selling_points, seniority_fit, recommended_resume, reasoning.
+
+key_skills, missing_skills, and selling_points must always be JSON arrays of
+strings. Use only evidence from the current job description and resume.
+"""
+
+
+def build_local_messages(prompt: str, system_prompt: str | None = None) -> list[dict[str, str]]:
+    """Build a new isolated conversation payload for every local LLM call."""
+    messages: list[dict[str, str]] = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": prompt},
+        {"role": "assistant", "content": "</think>\n{"},
+    ]
+    if system_prompt:
+        messages.insert(0, {"role": "system", "content": system_prompt})
+    return messages
+
 
 def call_local_llm(prompt: str, system_prompt: str | None = None) -> str:
     url = f"{_local_llm_base_url()}/chat/completions"
-    messages: list[dict[str, str]] = [{"role": "user", "content": prompt}]
-    if system_prompt:
-        messages.insert(0, {"role": "system", "content": system_prompt})
+    messages = build_local_messages(prompt, system_prompt)
 
     payload = {
         "model": _local_llm_model(),
         "messages": messages,
-        "temperature": 0.2,
+        "temperature": 0.0,
+        "max_tokens": 512,
+        "cache_prompt": False,
     }
 
-    resp = httpx.post(url, json=payload, timeout=_local_llm_timeout())
+    # LM Studio's local model can reuse a generation slot across concurrent
+    # requests even when prompt caching is disabled. Serialize calls so one
+    # job cannot receive another job's completion.
+    with _LOCAL_LLM_LOCK:
+        resp = httpx.post(url, json=payload, timeout=_local_llm_timeout())
     resp.raise_for_status()
     data = resp.json()
-    return data["choices"][0]["message"]["content"].strip()
+    raw_content = data["choices"][0]["message"]["content"] or ""
+    return parse_prefilled_completion(raw_content)
 
 
 def call_anthropic(prompt: str, system_prompt: str | None = None) -> str:

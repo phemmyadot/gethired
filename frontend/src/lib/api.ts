@@ -48,7 +48,7 @@ export const getJobs = (opts?: { source?: string; limit?: number; offset?: numbe
   return req<JobsPage>(`/jobs${qs ? `?${qs}` : ""}`);
 };
 export const matchAllJobs = (source?: string) =>
-  req<{ message: string; log_id: string }>(`/jobs/match-all${source ? `?source=${source}` : ""}`, { method: "POST" });
+  req<{ message: string; log_id: string }>(`/jobs/match-all?only_unmatched=false${source ? `&source=${source}` : ""}`, { method: "POST" });
 export const matchSelectedJobs = (jobIds: string[]) =>
   req<{ message: string; log_id: string }>(`/jobs/match-all?job_ids=${jobIds.join(",")}`, { method: "POST" });
 export const stopMatchAll = (logId: string) =>

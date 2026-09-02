@@ -13,7 +13,7 @@ from sqlalchemy import desc
 from ..db.models import get_session, Base, get_engine, Resume, Job, JobMatch, AppliedJob, IngestionLog
 from ..matching.resume_parser import extract_resume_text, clean_text
 from ..ingestion.pipeline import run_ingestion
-from ..matching.engine import SCORE_THRESHOLD
+from ..matching.engine import SCORE_THRESHOLD, normalize_selling_points
 from ..matching.profile import extract_profile
 from ..matching.orchestration import run_match_all, kick_off_match_all
 from ..applying.applicator import run_applications, generate_cover_letter
@@ -156,7 +156,7 @@ def list_jobs(
             "resume_label": best_match.resume.label if best_match and best_match.resume else None,
             "reasoning": best_match.reasoning if best_match else None,
             "missing_skills": best_match.missing_skills if best_match else None,
-            "selling_points": best_match.selling_points if best_match else None,
+            "selling_points": normalize_selling_points(best_match.selling_points) if best_match else None,
             "apply_status": applied.status if applied else None,
         })
     return {"items": results, "total": total}
@@ -264,7 +264,7 @@ def list_matches(
             "score":         round(m.score, 3),
             "reasoning":     m.reasoning,
             "missing_skills": m.missing_skills,
-            "selling_points": m.selling_points,
+            "selling_points": normalize_selling_points(m.selling_points),
             "applied":       applied is not None,
             "apply_status":  applied.status if applied else None,
             "application_id": str(applied.id) if applied else None,
@@ -475,6 +475,7 @@ def _run_full_pipeline():
 
         prefs = {
             "keywords": profile["search_keywords"],
+            "resume_title": latest_resume.label,
             "required_keywords": profile["required_keywords"],
         }
 

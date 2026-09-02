@@ -144,7 +144,7 @@ export function JobsTab({ onViewApplication, onMatchAll, onMatchSelected, onStop
           disabled={matching}
           className="text-xs font-semibold px-3.5 py-1.5 rounded-full bg-accent text-white hover:bg-accent/90 disabled:opacity-50 transition-colors whitespace-nowrap"
         >
-          {matching ? "Matching…" : "Match unmatched"}
+          {matching ? "Matching…" : "Refresh matches"}
         </button>
 
         {selected.size > 0 && (

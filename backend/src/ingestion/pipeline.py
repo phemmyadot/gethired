@@ -4,6 +4,7 @@ Returns list of newly inserted Job records for matching.
 """
 import logging
 import os
+import re
 import time
 from datetime import datetime
 from sqlalchemy.exc import IntegrityError
@@ -178,6 +179,27 @@ def pre_filter(job: dict, prefs: dict = None) -> bool:
     return True
 
 
+def _matches_resume_title(job: dict, prefs: dict) -> bool:
+    """Keep jobs whose titles match at least one active resume title term."""
+    profile_title = (prefs.get("resume_title") or prefs.get("keywords") or "").lower()
+    title_terms = [
+        term for term in re.findall(r"[a-z0-9]+", profile_title)
+        if term not in {"senior", "sr", "lead", "staff", "principal", "junior", "jr"}
+    ]
+    if not title_terms:
+        return True
+
+    job_title = job.get("title", "").lower()
+    equivalent_terms = set(title_terms)
+    if "software" in equivalent_terms or "engineer" in equivalent_terms:
+        equivalent_terms.update({
+            "developer", "programmer", "architect", "devops", "backend",
+            "frontend", "full-stack", "fullstack", "platform", "infrastructure",
+            "mobile",
+        })
+    return any(re.search(rf"\b{re.escape(term)}\b", job_title) for term in equivalent_terms)
+
+
 # ─────────────────────────────────────────────
 # Save to DB (with dedup via UNIQUE constraint)
 # ─────────────────────────────────────────────
@@ -325,12 +347,24 @@ def run_ingestion(db: Session, prefs: dict = None, sources: list[str] = None, lo
     filtered = [j for j in all_raw if pre_filter(j, prefs)]
     logger.info(f"Pre-filter: {len(filtered)}/{len(all_raw)} passed")
 
+    title_matched = [j for j in filtered if _matches_resume_title(j, prefs)]
+    logger.info(f"Resume-title filter: {len(title_matched)}/{len(filtered)} passed")
+
+    # Classify before persistence so only fully remote jobs enter the database.
+    from ..matching.engine import detect_work_mode
+    remote_only = []
+    for job in title_matched:
+        job["work_mode"] = detect_work_mode(job)
+        if job["work_mode"] == "remote":
+            remote_only.append(job)
+    logger.info(f"Remote-only filter: {len(remote_only)}/{len(filtered)} passed")
+
     # 3. Save (dedup via DB unique constraint)
     new_jobs: list[Job] = []
     duped = 0
     start = time.time()
 
-    for job_dict in filtered:
+    for job_dict in remote_only:
         job, is_new = save_job(job_dict, db)
         if is_new:
             new_jobs.append(job)

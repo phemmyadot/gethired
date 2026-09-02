@@ -62,6 +62,7 @@ def ingest(sources: list[str]):
 
         prefs = {
             "keywords": profile["search_keywords"],
+            "resume_title": latest_resume.label,
             "required_keywords": profile["required_keywords"],
         }
 

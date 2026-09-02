@@ -4,6 +4,7 @@ Returns the best resume and score for each job.
 """
 import json
 import logging
+import re
 import time
 import concurrent.futures
 from sqlalchemy.orm import Session
@@ -33,14 +34,77 @@ remote: fully remote, no office attendance required
 hybrid: some in-office days required alongside remote work
 onsite: full-time in-office / no remote option mentioned
 If unclear from the text, make your best guess from context (title, seniority, industry norms)."""
+import json
+import re
 
+def parse_llm_json_response(raw_output) -> dict:
+    """Safely parses string or dict responses from LLM helpers."""
+    if isinstance(raw_output, dict):
+        return raw_output
+    elif isinstance(raw_output, str):
+        formatted = raw_output.strip()
+        if not formatted.startswith("{"):
+            formatted = "{" + formatted
+        formatted = re.sub(r',\s*([\}\]])', r'\1', formatted)
+        return json.loads(formatted)
+    else:
+        raise TypeError(f"Expected dict or str, got {type(raw_output)}")
+
+
+def normalize_selling_points(value) -> list[str]:
+    """Convert malformed sentence strings into the array expected by the DB."""
+    if isinstance(value, str):
+        return [point.strip() for point in re.split(r"\.\s+(?=[A-Z])", value.strip()) if point.strip()]
+    if isinstance(value, list):
+        if len(value) > 1 and all(isinstance(point, str) and len(point) == 1 for point in value):
+            return normalize_selling_points("".join(value))
+        if any(
+            current and following and not current.endswith((".", "!", "?"))
+            and following[0].islower()
+            for current, following in zip(value, value[1:])
+        ):
+            repaired = " ".join(value)
+            repaired = re.sub(r"\bNode\s+js\b", "Node.js", repaired, flags=re.IGNORECASE)
+            return normalize_selling_points(repaired)
+        return value
+    return []
+
+
+def calculate_final_score(eval_result: dict) -> float:
+    """Calculate the final match score with discipline and scope safeguards."""
+    if not eval_result.get("discipline_match", True) or eval_result.get("scope_mismatch", False):
+        return 0.10
+
+    weights = {
+        "required_skills_pct": 0.40,
+        "domain_fit_pct": 0.30,
+        "seniority_fit_pct": 0.20,
+        "experience_years_pct": 0.10,
+    }
+    score = sum(
+        (eval_result.get(key, 0) / 100.0) * weight
+        for key, weight in weights.items()
+    )
+    return round(score, 2)
 
 def detect_work_mode(job: dict) -> str:
     """Classify a job's work mode via the LLM. One call per job, not per resume."""
+    listing_text = " ".join(
+        str(job.get(field) or "") for field in ("title", "location", "description")
+    ).lower()
+    if re.search(r"\b(in[- ]office|on[- ]site|onsite|office[- ]based)\b", listing_text):
+        return "onsite"
+    if re.search(r"\bhybrid\b", listing_text):
+        return "hybrid"
+    if job.get("remote") is True:
+        return "remote"
+    if job.get("remote") is False and job.get("location"):
+        return "onsite"
+
     try:
         prompt = WORK_MODE_PROMPT.format(title=job["title"], description=job["description"][:800])
         raw = generate_text(prompt)
-        result = json.loads(raw)
+        result = parse_llm_json_response(raw)
         mode = result.get("work_mode", "").lower()
         return mode if mode in ("remote", "hybrid", "onsite") else "onsite"
     except Exception as e:
@@ -48,70 +112,55 @@ def detect_work_mode(job: dict) -> str:
         return "onsite"
 
 
-SCORE_PROMPT = """You are a strict senior technical recruiter. Assume a resume does NOT match
-until you find concrete evidence otherwise. A shared buzzword or tool (e.g. both mention "React"
-or "Node.js") does NOT mean the candidate is qualified for a different discipline.
+SCORE_PROMPT = """You are an objective, highly precise technical recruiter evaluating resume fit for a job posting.
 
-First, identify the job's core discipline (e.g. mobile engineering, backend/API engineering, data
-engineering, sales, DevOps, ML engineering) and the resume's primary discipline from its actual
-work history. If they differ, cap required_skills_pct, domain_fit_pct, AND experience_years_pct
-ALL at 25 regardless of any shared tools, languages, or years of seniority — years of experience
-in a DIFFERENT discipline do not count toward this role. Only go higher on these three than 25 if
-the resume's actual day-to-day work matches the job's actual day-to-day work. Do NOT let a high
-seniority_fit_pct or seniority title compensate for a discipline mismatch — a senior mobile
-engineer applying to a senior backend role is still a mismatch, just at a senior level.
-
-For required_skills_pct: only count a required skill as demonstrated if the resume shows it was
-used hands-on for similar work, not just listed or mentioned in passing. A resume matching 0-1 of
-6+ required skills should score 0-15, not 60-80.
-
-Rate FOUR sub-factors on a 0-100 scale:
-
-1. required_skills_pct (0-100): % of the job's explicitly required skills/tools genuinely
-   demonstrated in the resume (see rule above).
-2. experience_years_pct (0-100): enough relevant years IN THIS DISCIPLINE (not just total years
-   in tech)? 100 = meets or exceeds. Capped at 25 if discipline mismatch (see above).
-3. domain_fit_pct (0-100): per the discipline check above.
-4. seniority_fit_pct (0-100): does seniority LEVEL match (not over/under-qualified)? This is the
-   only sub-factor NOT capped by discipline mismatch — it reflects level only.
-
-RESUME LABEL: {label}
-RESUME:
-{resume_content}
-
-JOB TITLE: {title} at {company}
+JOB TITLE: {title}
+COMPANY: {company}
 JOB DESCRIPTION:
 {description}
 
-Respond ONLY with valid JSON — no markdown, no preamble:
+CANDIDATE RESUME ({label}):
+{resume_content}
+
+REASONING RULES:
+1. Keep internal reasoning inside <think> strictly under 100 words. Move directly to evaluation.
+2. Focus strictly on skills explicitly listed under REQUIRED QUALIFICATIONS in the job description.
+
+SKILL-MATCHING & SEARCH RULES:
+- EQUIVALENCY RULE: Do NOT list a skill as "missing" if the candidate demonstrates equivalent technology:
+  * AWS / Azure / GCP = Cloud Infrastructure
+  * React Native / React / Vue / Angular = Frontend UI
+  * Node.js / Python / Go / Java / C# = Backend APIs
+  * PostgreSQL / MySQL / MongoDB / CosmosDB = Databases
+  * Docker / Kubernetes / CI/CD = DevOps & Deployment
+- NO HALLUCINATIONS: Do NOT list domain-specific tags (e.g., Robotics, ML, Computer Vision, Embedded) as "missing" UNLESS they are explicitly listed as mandatory requirements in the job description.
+- STRICT KEY SKILLS FORMAT: key_skills must be short skill/tool/technology NAMES ONLY (1-4 words each,
+  e.g. "React Native", "AWS", "CI/CD", "Kubernetes") — NEVER full sentences, responsibilities, or
+  bullet points copied from the job description. If the job description only lists responsibilities
+  and no explicit tech stack, INFER the underlying skill names implied by each responsibility (e.g.
+  "maintain internal web services" implies "Backend development"; "add observability" implies
+  "Observability tools") rather than copying the sentence verbatim. Extract exactly 4-6 of these.
+
+OUTPUT FORMAT:
+Output MUST be raw, valid JSON following this exact structure without markdown code blocks:
+
 {{
-  "job_discipline": "the job's core discipline, 2-4 words",
-  "resume_discipline": "the resume's primary discipline based on actual work history, 2-4 words",
-  "required_skills_pct": <int 0-100>,
-  "experience_years_pct": <int 0-100>,
-  "domain_fit_pct": <int 0-100>,
-  "seniority_fit_pct": <int 0-100>,
-  "reasoning": "One paragraph explaining the match quality, citing specific resume/job details and referencing the sub-scores above.",
-  "key_skills": ["skill1", "skill2"],
-  "missing_skills": ["skill1", "skill2"],
-  "selling_points": ["point1", "point2"],
-  "seniority_fit": "good|over|under",
-  "recommended_resume": true
-}}
-
-key_skills: the job posting's own top required skills/tools/technologies, independent of this
-  resume (max 6) — this describes what the JOB wants, not how well the candidate matches it
-missing_skills: skills/tools THE JOB REQUIRES that are NOT present anywhere in the resume (max 5).
-  Every entry must be a skill named or clearly implied by the JOB DESCRIPTION. NEVER list a skill
-  the resume has just because the job doesn't need it — that is backwards and wrong. Example: if
-  the job needs "Web components, Design system" and the resume shows "React Native, Expo" instead,
-  missing_skills = ["Web components", "Design system"] — NOT "React Native" or "Expo", since those
-  aren't required by the job at all, they're just what the resume happens to have instead.
-selling_points: strongest resume points for this role (max 4) — omit if disciplines don't match
-seniority_fit: is this role a good level match?
-recommended_resume: true if this is likely the best resume to use
-
-Do not include a "score" field — it will be computed from your four sub-scores."""
+  "job_discipline": "string",
+  "resume_discipline": "string",
+  "discipline_match": true,
+  "scope_mismatch": false,
+  "discipline_and_scope_analysis": "string",
+  "required_skills_pct": 0-100,
+  "experience_years_pct": 0-100,
+  "domain_fit_pct": 0-100,
+  "seniority_fit_pct": 0-100,
+  "key_skills": ["string"],
+  "missing_skills": ["string"],
+  "selling_points": ["string"],
+  "seniority_fit": "good",
+  "recommended_resume": true,
+  "reasoning": "string"
+}}"""
 
 
 def score_one(resume: dict, job: dict) -> dict:
@@ -126,20 +175,25 @@ def score_one(resume: dict, job: dict) -> dict:
 
     try:
         raw = generate_text(prompt)
-        result = json.loads(raw)
 
-        # Compute the score ourselves from the four sub-scores rather than
-        # trusting a model-produced float — a directly-generated score is
-        # prone to anchoring on whatever example values appear in the
-        # prompt (this happened twice: first on a literal example score,
-        # then again on a number listed as a "variety" example).
-        #
-        # Weighted, not averaged: a flat average let strong experience/domain/
-        # seniority scores mask near-zero required-skill overlap (e.g. a
-        # mobile engineer scored 75% against a backend API role because only
-        # 1 of 4 sub-scores reflected the actual skill mismatch). Required
-        # skills now dominate the score so a real skills gap can't be
-        # papered over by tenure or adjacent domain experience.
+        if isinstance(raw, dict):
+            result = raw
+        elif isinstance(raw, str):
+            formatted_raw = raw.strip()
+            
+            # Prepend missing opening brace if using assistant pre-fill
+            if not formatted_raw.startswith("{"):
+                formatted_raw = "{" + formatted_raw
+                
+            # Clean up trailing commas before closing braces/brackets
+            formatted_raw = re.sub(r',\s*([\}\]])', r'\1', formatted_raw)
+            
+            result = json.loads(formatted_raw)
+        else:
+            raise TypeError(f"Unexpected response type from generate_text: {type(raw)}")
+
+        result["selling_points"] = normalize_selling_points(result.get("selling_points"))
+
         sub_scores = {
             "required_skills_pct": result.get("required_skills_pct"),
             "experience_years_pct": result.get("experience_years_pct"),
@@ -149,14 +203,10 @@ def score_one(resume: dict, job: dict) -> dict:
         if any(v is None for v in sub_scores.values()):
             raise ValueError(f"Missing sub-score(s) in LLM response: {result}")
 
-        weights = {
-            "required_skills_pct": 0.50,
-            "experience_years_pct": 0.20,
-            "domain_fit_pct": 0.15,
-            "seniority_fit_pct": 0.15,
-        }
-        weighted = sum(sub_scores[k] * weights[k] for k in weights)
-        result["score"] = round(weighted / 100, 3)
+        result["score"] = calculate_final_score(result)
+        result.setdefault("reasoning", "")
+        result.setdefault("missing_skills", [])
+        result.setdefault("key_skills", [])
         result["failed"] = False
     except json.JSONDecodeError as e:
         logger.error(f"JSON parse error for {resume['label']} / {job['title']}: {e}")
@@ -190,6 +240,7 @@ def score_job_all_resumes(job: dict, resumes: list[dict]) -> list[dict]:
             executor.submit(score_one, resume, job): resume
             for resume in resumes
         }
+
         results = []
         for future in concurrent.futures.as_completed(futures):
             results.append(future.result())
@@ -207,6 +258,7 @@ def save_matches(job_id: str, scores: list[dict], db: Session):
     API errors) are never persisted as a real 0% match — that would
     permanently block the job from being picked up by a future rematch.
     """
+        
     for score in scores:
         if score.get("failed"):
             logger.warning(
@@ -273,7 +325,7 @@ def process_jobs_for_matching(
         return []
 
     candidates = []
-
+ 
     for job in jobs:
         job_id = str(job.id)
         job_start = time.monotonic()
@@ -284,11 +336,13 @@ def process_jobs_for_matching(
             "title":       job.title,
             "company":     job.company,
             "description": job.description,
+            "location":    job.location,
+            "remote":      job.remote,
         }
 
-        if not job.work_mode:
+        if not job.work_mode or (job.work_mode == "remote" and not job.remote):
             job.work_mode = detect_work_mode(job_dict)
-            db.commit()
+        db.commit()
 
         logger.info(f"Scoring: {job.title} @ {job.company} against {len(resume_dicts)} resumes")
         scores = score_job_all_resumes(job_dict, resume_dicts)
@@ -296,14 +350,17 @@ def process_jobs_for_matching(
         # Save all scores for the dashboard
         save_matches(job_id, scores, db)
 
-        # key_skills describes the job itself, not a resume pairing — cache
-        # it on the Job row the first time any successful score provides it.
-        if not job.key_skills:
-            for s in scores:
-                if not s.get("failed") and s.get("key_skills"):
-                    job.key_skills = s["key_skills"]
-                    db.commit()
-                    break
+        # key_skills describes the job itself, not a resume pairing — refresh
+        # it on every successful rescore (not just once) so an improved
+        # prompt/model correcting an earlier bad extraction actually takes
+        # effect instead of leaving a stale value cached forever. An empty
+        # list is meaningful for a discipline mismatch and must also replace
+        # the previous value.
+        for s in scores:
+            if not s.get("failed") and "key_skills" in s:
+                job.key_skills = s["key_skills"]
+                db.commit()
+                break
 
         job_elapsed = time.monotonic() - job_start
         logger.info(f"Job processed in {job_elapsed:.2f}s: {job.title} @ {job.company}")
