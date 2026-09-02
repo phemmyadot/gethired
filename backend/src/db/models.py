@@ -122,7 +122,7 @@ class IngestionLog(Base):
     __tablename__ = "ingestion_logs"
 
     id          = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    source      = Column(String(50))
+    source      = Column(String(255))
     run_type    = Column(String(20), default="pipeline")  # pipeline|match_all — distinguishes stoppable match-all runs
     status      = Column(String(20), default="running")  # running|ingesting|matching|applying|stopping|stopped|done|failed
     jobs_found  = Column(Float, default=0)

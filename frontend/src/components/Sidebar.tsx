@@ -10,20 +10,27 @@ const STAGE_LABELS: Record<string, string> = {
   ingesting: "Fetching jobs…",
   matching:  "Scoring matches…",
   applying:  "Applying…",
+  stopping:  "Stopping…",
+  stopped:   "Stopped",
   done:      "Done",
   failed:    "Failed",
 };
 
-export function Sidebar({ tab, onTabChange, navItems, pipelineRunning, onRunPipeline, lastRun, pipelineStatus }: {
+export function Sidebar({ tab, onTabChange, navItems, pipelineRunning, onRunPipeline, onStopPipeline, lastRun, pipelineStatus }: {
   tab: Tab;
   onTabChange: (t: Tab) => void;
   navItems: NavItemDef[];
   pipelineRunning: boolean;
   onRunPipeline: () => void;
+  onStopPipeline: () => void;
   lastRun: string | null;
   pipelineStatus: PipelineStatus;
 }) {
   const inProgress = pipelineStatus && ["running", "ingesting", "matching", "applying"].includes(pipelineStatus.status);
+  const stopping = pipelineStatus?.status === "stopping";
+  const canStopIngestion =
+    pipelineStatus?.run_type === "pipeline" &&
+    (pipelineStatus.status === "running" || pipelineStatus.status === "ingesting");
   return (
     <aside className="w-60 shrink-0 bg-paper border-r border-border flex flex-col">
       {/* Logo */}
@@ -59,6 +66,16 @@ export function Sidebar({ tab, onTabChange, navItems, pipelineRunning, onRunPipe
         >
           {pipelineRunning || inProgress ? "Running…" : "Run pipeline"}
         </button>
+
+        {canStopIngestion && (
+          <button
+            onClick={onStopPipeline}
+            disabled={stopping}
+            className="w-full text-sm font-semibold py-2 rounded-xl border border-rose text-rose hover:bg-rose-soft disabled:opacity-50 transition-colors"
+          >
+            {stopping ? "Stopping…" : "Stop fetch"}
+          </button>
+        )}
 
         {inProgress && pipelineStatus && (
           <div className="text-xs text-muted flex flex-col gap-1 bg-panel rounded-xl px-3 py-2.5">

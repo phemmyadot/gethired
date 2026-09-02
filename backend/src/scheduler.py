@@ -66,11 +66,15 @@ def ingest(sources: list[str]):
         }
 
         logger.info(f"Ingestion start: sources={sources}, keywords={prefs['keywords']!r}")
-        log.status = "ingesting"
-        db.commit()
+        db.refresh(log)
+        if log.status != "stopping":
+            log.status = "ingesting"
+            db.commit()
         new_jobs = run_ingestion(db, prefs=prefs, sources=sources, log=log)
-        log.status = "done"
-        db.commit()
+        db.refresh(log)
+        if log.status != "stopped":
+            log.status = "done"
+            db.commit()
 
         if not new_jobs:
             logger.info("No new jobs this cycle")

@@ -244,6 +244,18 @@ def _keyword_variants(keywords: str) -> list[str]:
     return [keywords, stripped] if stripped else [keywords]
 
 
+def _is_stopping(log_id) -> bool:
+    if not log_id:
+        return False
+    from ..db.models import get_session as _get_session
+    check_db = _get_session()
+    try:
+        status = check_db.query(IngestionLog.status).filter_by(id=log_id).scalar()
+        return status == "stopping"
+    finally:
+        check_db.close()
+
+
 def run_ingestion(db: Session, prefs: dict = None, sources: list[str] = None, log: IngestionLog = None) -> list[Job]:
     """
     Fetch from all sources, pre-filter, dedup, save.
@@ -253,9 +265,15 @@ def run_ingestion(db: Session, prefs: dict = None, sources: list[str] = None, lo
     sources = sources or _default_sources()
     all_raw: list[dict] = []
     keyword_variants = _keyword_variants((prefs or {}).get("keywords", "software engineer"))
+    log_id = log.id if log else None
+    should_stop = (lambda: _is_stopping(log_id)) if log_id else None
 
     # 1. Fetch — search each keyword variant (e.g. with and without "senior")
     for keywords in keyword_variants:
+        if should_stop and should_stop():
+            logger.info("Ingestion stopped early (before aggregator fetch)")
+            break
+
         if "adzuna" in sources:
             all_raw.extend(fetch_adzuna(keywords=keywords))
 
@@ -271,25 +289,37 @@ def run_ingestion(db: Session, prefs: dict = None, sources: list[str] = None, lo
         if "arbeitnow" in sources:
             all_raw.extend(fetch_arbeitnow(search=keywords))
 
-    # Discover new Greenhouse/Lever/Ashby companies from aggregator-sourced
-    # company names before fetching those ATS sources, so newly-confirmed
-    # tokens are included in this same run's fetch.
-    aggregator_companies = {j["company"] for j in all_raw if j.get("source") in AGGREGATOR_SOURCES}
-    if aggregator_companies:
-        discover_ats_companies(db, aggregator_companies)
+    stopped = bool(should_stop and should_stop())
 
-    if "greenhouse" in sources:
-        companies = list(set(GREENHOUSE_COMPANIES) | set(_confirmed_tokens(db, "greenhouse")))
-        all_raw.extend(fetch_greenhouse_all(companies=companies))
+    if not stopped:
+        # Discover new Greenhouse/Lever/Ashby companies from aggregator-sourced
+        # company names before fetching those ATS sources, so newly-confirmed
+        # tokens are included in this same run's fetch.
+        aggregator_companies = {j["company"] for j in all_raw if j.get("source") in AGGREGATOR_SOURCES}
+        if aggregator_companies:
+            discover_ats_companies(db, aggregator_companies)
 
-    if "lever" in sources:
-        companies = list(set(LEVER_COMPANIES) | set(_confirmed_tokens(db, "lever")))
-        all_raw.extend(fetch_lever_all(companies=companies))
+        if "greenhouse" in sources and not (should_stop and should_stop()):
+            companies = list(set(GREENHOUSE_COMPANIES) | set(_confirmed_tokens(db, "greenhouse")))
+            all_raw.extend(fetch_greenhouse_all(companies=companies, should_stop=should_stop))
 
-    if "ashby" in sources:
-        all_raw.extend(fetch_ashby_all(companies=_confirmed_tokens(db, "ashby") or None))
+        if "lever" in sources and not (should_stop and should_stop()):
+            companies = list(set(LEVER_COMPANIES) | set(_confirmed_tokens(db, "lever")))
+            all_raw.extend(fetch_lever_all(companies=companies, should_stop=should_stop))
 
-    logger.info(f"Ingestion: {len(all_raw)} total raw jobs from {len(sources)} sources")
+        if "ashby" in sources and not (should_stop and should_stop()):
+            all_raw.extend(fetch_ashby_all(companies=_confirmed_tokens(db, "ashby") or None, should_stop=should_stop))
+
+    stopped = stopped or bool(should_stop and should_stop())
+    logger.info(f"Ingestion: {len(all_raw)} total raw jobs from {len(sources)} sources" + (" (stopped early)" if stopped else ""))
+
+    # The `log` row may have been flipped to "stopping" by a concurrent stop
+    # request while fetching ran. Refresh so this session's in-memory copy
+    # reflects that instead of clobbering it back to "ingesting" on the next
+    # commit below (SQLAlchemy flushes ALL mapped columns on a dirty object,
+    # not just ones this code path reassigned).
+    if log is not None:
+        db.refresh(log)
 
     # 2. Pre-filter
     filtered = [j for j in all_raw if pre_filter(j, prefs)]
@@ -320,6 +350,8 @@ def run_ingestion(db: Session, prefs: dict = None, sources: list[str] = None, lo
     log.jobs_new = len(new_jobs)
     log.jobs_duped = duped
     log.duration_s = duration
+    if stopped:
+        log.status = "stopped"
     db.commit()
 
     return new_jobs

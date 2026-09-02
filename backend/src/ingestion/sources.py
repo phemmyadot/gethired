@@ -321,11 +321,14 @@ def fetch_greenhouse_company(board_token: str) -> list[dict]:
     return jobs
 
 
-def fetch_greenhouse_all(companies: list[str] = None) -> list[dict]:
+def fetch_greenhouse_all(companies: list[str] = None, should_stop=None) -> list[dict]:
     """Fetch from all configured Greenhouse companies."""
     targets = companies or GREENHOUSE_COMPANIES
     all_jobs = []
     for company in targets:
+        if should_stop and should_stop():
+            logger.info("Greenhouse fetch stopped early")
+            break
         try:
             jobs = fetch_greenhouse_company(company)
             all_jobs.extend(jobs)
@@ -390,11 +393,14 @@ def fetch_lever_company(company: str) -> list[dict]:
     return jobs
 
 
-def fetch_lever_all(companies: list[str] = None) -> list[dict]:
+def fetch_lever_all(companies: list[str] = None, should_stop=None) -> list[dict]:
     """Fetch from all configured Lever companies."""
     targets = companies or LEVER_COMPANIES
     all_jobs = []
     for company in targets:
+        if should_stop and should_stop():
+            logger.info("Lever fetch stopped early")
+            break
         try:
             jobs = fetch_lever_company(company)
             all_jobs.extend(jobs)
@@ -442,11 +448,14 @@ def fetch_ashby_company(board_token: str) -> list[dict]:
     return jobs
 
 
-def fetch_ashby_all(companies: list[str] = None) -> list[dict]:
+def fetch_ashby_all(companies: list[str] = None, should_stop=None) -> list[dict]:
     """Fetch from all configured Ashby companies."""
     targets = companies or ASHBY_COMPANIES
     all_jobs = []
     for company in targets:
+        if should_stop and should_stop():
+            logger.info("Ashby fetch stopped early")
+            break
         try:
             jobs = fetch_ashby_company(company)
             all_jobs.extend(jobs)

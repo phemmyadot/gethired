@@ -2,7 +2,7 @@
 import Head from "next/head";
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
-  getStats, getMatches, getApplications, getResumes, triggerPipeline, getPipelineStatus, getRunStatus, matchAllJobs, matchSelectedJobs, stopMatchAll,
+  getStats, getMatches, getApplications, getResumes, triggerPipeline, getPipelineStatus, getRunStatus, matchAllJobs, matchSelectedJobs, stopMatchAll, stopPipeline,
   type Stats, type Match, type Application, type Resume, type PipelineStatus,
 } from "../lib/api";
 import { Sidebar, type Tab } from "../components/Sidebar";
@@ -28,6 +28,7 @@ export default function Home() {
   const [jobsVersion, setJobsVersion] = useState(0);
   const [matchAllLogId, setMatchAllLogId] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const currentLogIdRef = useRef<string | null>(null);
 
   function viewApplication(applicationId: string) {
     setFocusedAppId(applicationId);
@@ -60,6 +61,7 @@ export default function Home() {
     pollRef.current = setInterval(async () => {
       const status = await fetchStatus().catch(() => null);
       setPipelineStatus(status);
+      if (status) currentLogIdRef.current = status.id;
       if (!status || !IN_PROGRESS_STATUSES.includes(status.status)) {
         stopPolling();
         setLastRun(new Date().toLocaleTimeString());
@@ -135,6 +137,15 @@ export default function Home() {
     }
   }
 
+  async function handleStopPipeline() {
+    if (!currentLogIdRef.current) return;
+    try {
+      await stopPipeline(currentLogIdRef.current);
+    } catch {
+      // ignore — polling will reflect whatever the backend ends up reporting
+    }
+  }
+
   function startMatchRun(trigger: () => Promise<{ log_id: string }>) {
     return async () => {
       setPipelineRunning(true);
@@ -185,6 +196,7 @@ export default function Home() {
         navItems={navItems}
         pipelineRunning={pipelineRunning}
         onRunPipeline={handlePipeline}
+        onStopPipeline={handleStopPipeline}
         lastRun={lastRun}
         pipelineStatus={pipelineStatus}
       />

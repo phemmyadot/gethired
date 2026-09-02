@@ -105,3 +105,5 @@ export type PipelineStatus = {
 } | null;
 export const getPipelineStatus = () => req<PipelineStatus>("/pipeline/status");
 export const getRunStatus = (logId: string) => req<PipelineStatus>(`/pipeline/status/${logId}`);
+export const stopPipeline = (logId: string) =>
+  req<{ message: string }>(`/pipeline/${logId}/stop`, { method: "POST" });

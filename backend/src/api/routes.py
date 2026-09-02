@@ -376,6 +376,25 @@ def trigger_pipeline(
     return {"message": "Pipeline started in background"}
 
 
+@app.post("/pipeline/{log_id}/stop")
+def stop_pipeline(log_id: UUID, db: Session = Depends(get_db)):
+    """
+    Request that an in-progress ingestion (fetch) run stop. Checked between
+    each source/company fetch, so it halts within a few requests rather
+    than instantly, but well before the full source list is exhausted.
+    Jobs fetched so far are still saved.
+    """
+    log = db.query(IngestionLog).filter_by(id=log_id).first()
+    if not log:
+        raise HTTPException(404, "Run not found")
+    if log.status not in ("running", "ingesting"):
+        raise HTTPException(409, f"Run is not active (status: {log.status})")
+
+    log.status = "stopping"
+    db.commit()
+    return {"message": "Stop requested — will halt shortly"}
+
+
 def _serialize_log(log: IngestionLog) -> dict:
     return {
         "id":            str(log.id),
@@ -459,11 +478,15 @@ def _run_full_pipeline():
             "required_keywords": profile["required_keywords"],
         }
 
-        log.status = "ingesting"
-        db.commit()
+        db.refresh(log)
+        if log.status != "stopping":
+            log.status = "ingesting"
+            db.commit()
         new_jobs = run_ingestion(db, prefs=prefs, log=log)
-        log.status = "done"
-        db.commit()
+        db.refresh(log)
+        if log.status != "stopped":
+            log.status = "done"
+            db.commit()
 
         if new_jobs:
             kick_off_match_all()
