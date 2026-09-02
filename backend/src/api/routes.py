@@ -115,6 +115,8 @@ def list_jobs(
 
     best_score_subq = (
         db.query(JobMatch.job_id, func.max(JobMatch.score).label("best_score"))
+        .join(Resume, JobMatch.resume_id == Resume.id)
+        .filter(Resume.active == True)
         .group_by(JobMatch.job_id)
         .subquery()
     )
@@ -140,7 +142,9 @@ def list_jobs(
         applied = db.query(AppliedJob).filter_by(job_id=j.id).first()
         best_match = (
             db.query(JobMatch)
-            .filter_by(job_id=j.id)
+            .join(Resume, JobMatch.resume_id == Resume.id)
+            .filter(Resume.active == True)
+            .filter(JobMatch.job_id == j.id)
             .order_by(desc(JobMatch.score))
             .first()
         )
@@ -239,6 +243,8 @@ def list_matches(
     """All job matches above a score threshold, with application status."""
     matches = (
         db.query(JobMatch)
+        .join(Resume, JobMatch.resume_id == Resume.id)
+        .filter(Resume.active == True)
         .filter(JobMatch.score >= min_score)
         .order_by(desc(JobMatch.score))
         .limit(limit)

@@ -134,6 +134,13 @@ class IngestionLog(Base):
     duration_s  = Column(Float)
 
 
+class SourcePoolState(Base):
+    __tablename__ = "source_pool_states"
+
+    source = Column(String(50), primary_key=True)
+    last_pooled_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
 class DiscoveredAtsCompany(Base):
     """
     Cache of company-name -> ATS board-token lookups, discovered from company

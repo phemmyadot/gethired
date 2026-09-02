@@ -16,7 +16,7 @@ from .sources import (
     GREENHOUSE_COMPANIES, LEVER_COMPANIES,
     slug_candidates, PROBE_FUNCS,
 )
-from ..db.models import Job, IngestionLog, DiscoveredAtsCompany
+from ..db.models import Job, IngestionLog, SourcePoolState, DiscoveredAtsCompany
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +93,92 @@ def _default_sources() -> list[str]:
 AGGREGATOR_SOURCES = {"adzuna", "remotive", "remoteok", "jobicy", "arbeitnow"}
 ATS_SOURCES = ["greenhouse", "lever", "ashby"]
 DISCOVERY_PROBE_CAP = int(os.getenv("ATS_DISCOVERY_PROBE_CAP", "10"))  # new companies probed per source per run
+
+
+class JobWorkModeScanner:
+    """Classify high-confidence work-mode and geographic signals in job text."""
+
+    HYBRID_ONSITE = re.compile(
+        r"\b(hybrid|on[- ]site|onsite|in[- ]office|office[- ]based|"
+        r"\d+\s*days?\s*(a|per)?\s*week\s*in\s*(the\s*)?office|"
+        r"relocation\s+required|must\s+be\s+located\s+in|office\s+attendance)\b",
+        re.IGNORECASE,
+    )
+    RESTRICTED_REMOTE = re.compile(
+        r"\b(remote\s+in|must\s+(reside|live)\s+in|restricted\s+to|"
+        r"open\s+to\s+residents\s+of|remote\s*\([^)]*\s+only\))",
+        re.IGNORECASE,
+    )
+    US_REMOTE = re.compile(
+        r"\b(remote\s*[-,]\s*(us|united states)|remote\s*\(\s*(us|united states)\s*\)|"
+        r"remote\s+in\s+the\s+(us|united states)|"
+        r"work\s+from\s+anywhere\s+in\s+the\s+(us|united states)|"
+        r"100%\s+remote\s*(us|united states)?|fully\s+remote\s*(us|united states)?|"
+        r"us\s+national\s+remote|remote\s+within\s+the\s+(us|united states)|"
+        r"anywhere\s+in\s+the\s+us)\b",
+        re.IGNORECASE,
+    )
+    GENERIC_REMOTE = re.compile(r"\b(remote|work\s+from\s+home|wfh|telecommute|distributed\s+team)\b", re.IGNORECASE)
+
+    def scan(self, text: str) -> dict:
+        if not text or len(text) < 100:
+            return {"work_mode": "invalid", "confidence": "high"}
+        if self.HYBRID_ONSITE.search(text):
+            return {"work_mode": "hybrid_or_onsite", "confidence": "high"}
+        if self.US_REMOTE.search(text):
+            return {"work_mode": "remote", "confidence": "high"}
+        if self.RESTRICTED_REMOTE.search(text):
+            return {"work_mode": "restricted_remote", "confidence": "high"}
+        if self.GENERIC_REMOTE.search(text):
+            return {"work_mode": "remote", "confidence": "medium"}
+        return {"work_mode": "unknown", "confidence": "low"}
+
+
+WORK_MODE_SCANNER = JobWorkModeScanner()
+
+JOB_METADATA_PROMPT = """You are a precise job metadata extraction engine.
+Analyze only this job posting and return valid JSON. Do not use markdown.
+
+Required JSON fields:
+{{
+    "work_mode": "remote|hybrid|onsite|unknown",
+    "is_us_remote_eligible": true,
+    "state_restrictions": ["string"],
+    "is_engineering_role": true,
+    "confidence": "high|medium|low"
+}}
+
+Job title: {title}
+Company: {company}
+Raw location: {location}
+Job description:
+{description}
+
+Use only the current posting. A role is engineering only when its primary
+function is software, platform, infrastructure, data, AI, systems, or DevOps
+engineering. Developer advocacy, recruiting, sales, and support are not
+engineering roles. Generic remote without US eligibility is not eligible.
+"""
+
+
+def extract_ambiguous_job_metadata(job: dict) -> dict:
+    """Use the fast extraction model only when regex signals are ambiguous."""
+    from ..llm import generate_text
+    from ..matching.engine import parse_llm_json_response
+
+    prompt = JOB_METADATA_PROMPT.format(
+        title=job.get("title", ""),
+        company=job.get("company", ""),
+        location=job.get("location", ""),
+        description=job.get("description", "")[:1800],
+    )
+    result = parse_llm_json_response(generate_text(prompt))
+    return {
+        "work_mode": result.get("work_mode", "unknown"),
+        "is_us_remote_eligible": bool(result.get("is_us_remote_eligible", False)),
+        "is_engineering_role": bool(result.get("is_engineering_role", False)),
+        "confidence": result.get("confidence", "low"),
+    }
 
 
 def discover_ats_companies(db: Session, company_names: set[str]) -> None:
@@ -180,7 +266,7 @@ def pre_filter(job: dict, prefs: dict = None) -> bool:
 
 
 def _matches_resume_title(job: dict, prefs: dict) -> bool:
-    """Keep jobs whose titles match at least one active resume title term."""
+    """Keep jobs in a discipline represented by the active resume profile."""
     profile_title = (prefs.get("resume_title") or prefs.get("keywords") or "").lower()
     title_terms = [
         term for term in re.findall(r"[a-z0-9]+", profile_title)
@@ -198,11 +284,13 @@ def _matches_resume_title(job: dict, prefs: dict) -> bool:
         return any(term in profile_title for term in non_engineering_terms)
 
     equivalent_terms = set(title_terms)
-    if "software" in equivalent_terms or "engineer" in equivalent_terms:
+    if {"software", "engineer"} & equivalent_terms:
         equivalent_terms.update({
             "developer", "programmer", "architect", "devops", "backend",
             "frontend", "full-stack", "fullstack", "platform", "infrastructure",
-            "mobile",
+            "systems", "cloud", "sre", "reliability", "data", "mlops", "machine",
+            "learning", "ai", "llm", "mobile", "applications", "application",
+            "core", "tech", "technical",
         })
     return any(re.search(rf"\b{re.escape(term)}\b", job_title) for term in equivalent_terms)
 
@@ -342,6 +430,32 @@ def run_ingestion(db: Session, prefs: dict = None, sources: list[str] = None, lo
     stopped = stopped or bool(should_stop and should_stop())
     logger.info(f"Ingestion: {len(all_raw)} total raw jobs from {len(sources)} sources" + (" (stopped early)" if stopped else ""))
 
+    pool_cutoffs = {
+        row.source: row.last_pooled_at
+        for row in db.query(SourcePoolState).filter(SourcePoolState.source.in_(sources)).all()
+    }
+    before_cursor = len(all_raw)
+    all_raw = [
+        job for job in all_raw
+        if not pool_cutoffs.get(job["source"])
+        or not _parse_posted_at(job.get("posted_at"))
+        or _parse_posted_at(job.get("posted_at")) > pool_cutoffs[job["source"]]
+    ]
+    logger.info(f"Source pool cursor: {len(all_raw)}/{before_cursor} newer raw jobs")
+
+    # Deduplicate before running filters or classifiers. This avoids repeating
+    # work for records already known to the database or repeated by sources.
+    existing_keys = set(db.query(Job.source, Job.external_id).all())
+    seen_keys = set()
+    fresh_raw = []
+    for job in all_raw:
+        key = (job["source"], job["external_id"])
+        if key not in existing_keys and key not in seen_keys:
+            fresh_raw.append(job)
+            seen_keys.add(key)
+    logger.info(f"Early deduplication: {len(fresh_raw)}/{len(all_raw)} new raw jobs")
+    all_raw = fresh_raw
+
     # The `log` row may have been flipped to "stopping" by a concurrent stop
     # request while fetching ran. Refresh so this session's in-memory copy
     # reflects that instead of clobbering it back to "ingesting" on the next
@@ -358,11 +472,28 @@ def run_ingestion(db: Session, prefs: dict = None, sources: list[str] = None, lo
     logger.info(f"Resume-title filter: {len(title_matched)}/{len(filtered)} passed")
 
     # Classify before persistence so only fully remote jobs enter the database.
-    from ..matching.engine import detect_work_mode
+    scanner = WORK_MODE_SCANNER
     remote_only = []
     for job in title_matched:
-        job["work_mode"] = detect_work_mode(job)
-        if job["work_mode"] == "remote":
+        scan = scanner.scan(
+            " ".join(str(job.get(field) or "") for field in ("title", "location", "description"))
+        )
+        if scan["work_mode"] in ("invalid", "hybrid_or_onsite", "restricted_remote"):
+            continue
+        if scan["confidence"] == "high":
+            job["work_mode"] = scan["work_mode"]
+            job["is_us_remote_eligible"] = True
+            job["is_engineering_role"] = True
+        else:
+            metadata = extract_ambiguous_job_metadata(job)
+            job["work_mode"] = metadata["work_mode"]
+            job["is_us_remote_eligible"] = metadata["is_us_remote_eligible"]
+            job["is_engineering_role"] = metadata["is_engineering_role"]
+        if (
+            job["work_mode"] == "remote"
+            and job["is_us_remote_eligible"]
+            and job["is_engineering_role"]
+        ):
             remote_only.append(job)
     logger.info(f"Remote-only filter: {len(remote_only)}/{len(filtered)} passed")
 
@@ -372,7 +503,11 @@ def run_ingestion(db: Session, prefs: dict = None, sources: list[str] = None, lo
     start = time.time()
 
     for job_dict in remote_only:
-        job, is_new = save_job(job_dict, db)
+        persisted_job = {
+            key: value for key, value in job_dict.items()
+            if key not in {"is_us_remote_eligible", "is_engineering_role"}
+        }
+        job, is_new = save_job(persisted_job, db)
         if is_new:
             new_jobs.append(job)
         else:
@@ -394,5 +529,15 @@ def run_ingestion(db: Session, prefs: dict = None, sources: list[str] = None, lo
     if stopped:
         log.status = "stopped"
     db.commit()
+
+    if not stopped:
+        pooled_at = datetime.utcnow()
+        for source in sources:
+            state = db.query(SourcePoolState).filter_by(source=source).first()
+            if state:
+                state.last_pooled_at = pooled_at
+            else:
+                db.add(SourcePoolState(source=source, last_pooled_at=pooled_at))
+        db.commit()
 
     return new_jobs
