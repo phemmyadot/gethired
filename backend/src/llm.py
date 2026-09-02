@@ -35,6 +35,10 @@ def _local_llm_model() -> str:
     return os.getenv("LOCAL_LLM_MODEL", "llama3.1")
 
 
+def _local_llm_scoring_model() -> str:
+    return os.getenv("LOCAL_LLM_SCORING_MODEL", "qwen2.5-7b-instruct")
+
+
 def _local_llm_timeout() -> float:
     return float(os.getenv("LOCAL_LLM_TIMEOUT", "120"))
 
@@ -91,24 +95,31 @@ resume.
 """
 
 
-def build_local_messages(prompt: str, system_prompt: str | None = None) -> list[dict[str, str]]:
-    """Build a new isolated conversation payload for every local LLM call."""
+def build_local_messages(
+    prompt: str,
+    system_prompt: str | None = None,
+    model: str | None = None,
+) -> list[dict[str, str]]:
+    """Build an isolated payload with a prefill only for reasoning models."""
     messages: list[dict[str, str]] = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": prompt},
-        {"role": "assistant", "content": "</think>\n{"},
     ]
+    selected_model = model or _local_llm_model()
+    if selected_model.lower().startswith("deepseek"):
+        messages.append({"role": "assistant", "content": "</think>\n{"})
     if system_prompt:
         messages.insert(0, {"role": "system", "content": system_prompt})
     return messages
 
 
-def call_local_llm(prompt: str, system_prompt: str | None = None) -> str:
+def call_local_llm(prompt: str, system_prompt: str | None = None, model: str | None = None) -> str:
     url = f"{_local_llm_base_url()}/chat/completions"
-    messages = build_local_messages(prompt, system_prompt)
+    selected_model = model or _local_llm_model()
+    messages = build_local_messages(prompt, system_prompt, selected_model)
 
     payload = {
-        "model": _local_llm_model(),
+        "model": selected_model,
         "messages": messages,
         "temperature": 0.0,
         "max_tokens": 512,
@@ -122,6 +133,12 @@ def call_local_llm(prompt: str, system_prompt: str | None = None) -> str:
         resp = httpx.post(url, json=payload, timeout=_local_llm_timeout())
     resp.raise_for_status()
     data = resp.json()
+    response_model = data.get("model", "unknown")
+    logger.info("Local LLM response model: %s", response_model)
+    if response_model != "unknown" and response_model != selected_model:
+        raise RuntimeError(
+            f"Local LLM returned {response_model!r} instead of requested {selected_model!r}"
+        )
     raw_content = data["choices"][0]["message"]["content"] or ""
     return parse_prefilled_completion(raw_content)
 
@@ -147,7 +164,7 @@ def call_anthropic(prompt: str, system_prompt: str | None = None) -> str:
     return response.content[0].text.strip()
 
 
-def generate_text(prompt: str, system_prompt: str | None = None) -> str:
+def generate_text(prompt: str, system_prompt: str | None = None, model: str | None = None) -> str:
     provider = os.getenv("LLM_PROVIDER", "local").lower()
     prompt_chars = len(prompt) + len(system_prompt or "")
     start = time.monotonic()
@@ -168,8 +185,8 @@ def generate_text(prompt: str, system_prompt: str | None = None) -> str:
 
     if provider in {"local", "openai_compatible"}:
         try:
-            result = call_local_llm(prompt, system_prompt)
-            _log_timing("local")
+            result = call_local_llm(prompt, system_prompt, model)
+            _log_timing(f"local:{model or _local_llm_model()}")
             return result
         except Exception as exc:
             logger.warning("Local LLM provider failed: %s", exc)

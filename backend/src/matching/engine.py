@@ -10,7 +10,7 @@ import concurrent.futures
 from sqlalchemy.orm import Session
 
 from ..db.models import Job, Resume, JobMatch, AppliedJob
-from ..llm import generate_text
+from ..llm import generate_text, _local_llm_scoring_model
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +130,9 @@ SKILL-MATCHING & SEARCH RULES:
 - FIRST EXTRACT THE JOB: Identify its primary domain and explicit required
     stack before considering the resume. key_skills must come from the job
     description, not from the resume summary.
+- DIRECTIONAL GAP CHECK: missing_skills means required skills present in the
+    JOB DESCRIPTION but absent from the CANDIDATE RESUME. Never list skills
+    the candidate has when the job does not require them.
 - KEEP SCOPE ACCURATE: Do not mention Mobile, React Native, or mobile apps
     unless the job description explicitly requires iOS, Android, React Native,
     or mobile development. For backend/systems roles, focus on the stated
@@ -183,7 +186,7 @@ def score_one(resume: dict, job: dict) -> dict:
     )
 
     try:
-        raw = generate_text(prompt)
+        raw = generate_text(prompt, model=_local_llm_scoring_model())
 
         if isinstance(raw, dict):
             result = raw
