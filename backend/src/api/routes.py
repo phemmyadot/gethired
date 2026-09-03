@@ -14,7 +14,7 @@ from ..db.models import get_session, Base, get_engine, Resume, Job, JobMatch, Ap
 from ..matching.resume_parser import extract_resume_text, clean_text
 from ..ingestion.pipeline import run_ingestion
 from ..matching.engine import SCORE_THRESHOLD, normalize_selling_points
-from ..matching.profile import extract_profile
+from ..matching.profile import extract_profile, extract_job_titles
 from ..matching.orchestration import run_match_all, kick_off_match_all
 from ..applying.applicator import run_applications, generate_cover_letter
 
@@ -74,11 +74,12 @@ async def upload_resume(
         label=label,
         content=content,
         file_path=save_path,
+        job_titles=extract_job_titles(content),
     )
     db.add(resume)
     db.commit()
     db.refresh(resume)
-    return {"id": str(resume.id), "label": resume.label, "filename": resume.filename}
+    return {"id": str(resume.id), "label": resume.label, "filename": resume.filename, "job_titles": resume.job_titles}
 
 
 @app.get("/resumes")
@@ -86,7 +87,8 @@ def list_resumes(db: Session = Depends(get_db)):
     resumes = db.query(Resume).filter_by(user_id=USER_ID, active=True).all()
     return [{"id": str(r.id), "label": r.label, "filename": r.filename,
              "created_at": r.created_at, "search_keywords": r.search_keywords,
-             "required_keywords": r.required_keywords or []} for r in resumes]
+             "required_keywords": r.required_keywords or [],
+             "job_titles": r.job_titles or []} for r in resumes]
 
 
 @app.delete("/resumes/{resume_id}")
@@ -482,6 +484,7 @@ def _run_full_pipeline():
         prefs = {
             "keywords": profile["search_keywords"],
             "resume_title": latest_resume.label,
+            "resume_job_titles": latest_resume.job_titles or [],
             "required_keywords": profile["required_keywords"],
         }
 

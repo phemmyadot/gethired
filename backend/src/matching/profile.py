@@ -67,6 +67,47 @@ _GENERIC_KEYWORD_TERMS = {
 }
 
 
+JOB_TITLES_PROMPT = """Read this resume and list job titles this candidate is qualified for.
+
+RESUME:
+{resume_content}
+
+Return ONLY valid JSON in this exact shape:
+{{
+  "job_titles": ["title_1", "title_2", "title_3"]
+}}
+
+List 3-6 job titles, ordered from the closest match to their actual experience
+(e.g. their most recent/senior title) down to reasonable adjacent titles they
+could also apply for. Use real job-posting title phrasing, e.g. "Senior Backend
+Engineer", "Backend Engineer", "Software Engineer", "Platform Engineer". Base
+these only on the discipline and seniority evidenced in the resume — do not
+invent unrelated disciplines."""
+
+
+def extract_job_titles(resume_content: str, retries: int = 3) -> list[str]:
+    """
+    Derive a ranked list of job titles this candidate is qualified for, via
+    the LLM. Called once per resume upload (not every ingestion run) since
+    a resume's titles don't change between ingestion runs the way a search
+    profile might need to be nudged. Returns [] if every attempt fails —
+    callers should fall back to existing title-matching behavior in that case.
+    """
+    for attempt in range(1, retries + 1):
+        try:
+            raw = generate_text(JOB_TITLES_PROMPT.format(resume_content=resume_content[:4000]))
+            parsed = raw if isinstance(raw, dict) else json.loads(raw)
+            titles = [t.strip() for t in parsed.get("job_titles", []) if t and t.strip()]
+            if titles:
+                return titles
+            raise ValueError("no job_titles in response")
+        except Exception as e:
+            logger.warning(f"Job title extraction attempt {attempt}/{retries} failed: {e}")
+
+    logger.error(f"Job title extraction failed after {retries} attempts")
+    return []
+
+
 def extract_profile(resume_content: str, retries: int = 3) -> dict | None:
     """
     Derive search keywords and required keywords from a resume via the LLM.

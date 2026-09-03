@@ -276,7 +276,11 @@ def pre_filter(job: dict, prefs: dict = None) -> bool:
 
 def _matches_resume_title(job: dict, prefs: dict) -> bool:
     """Keep jobs in a discipline represented by the active resume profile."""
-    profile_title = (prefs.get("resume_title") or prefs.get("keywords") or "").lower()
+    resume_job_titles = prefs.get("resume_job_titles") or []
+    if resume_job_titles:
+        profile_title = " ".join(resume_job_titles).lower()
+    else:
+        profile_title = (prefs.get("resume_title") or prefs.get("keywords") or "").lower()
     title_terms = [
         term for term in re.findall(r"[a-z0-9]+", profile_title)
         if term not in {"senior", "sr", "lead", "staff", "principal", "junior", "jr"}
