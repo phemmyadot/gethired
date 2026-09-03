@@ -173,6 +173,34 @@ def validate_and_clean_eval(resume_text: str, eval_result: dict, job_text: str =
             cleaned_missing.append(skill)
     eval_result["missing_skills"] = cleaned_missing
 
+    # A named primary language/framework in the JOB TITLE is an unambiguous,
+    # binary requirement — not a soft domain-fit signal the LLM can average
+    # away. Same job/resume pair was observed scoring 45% and 76% across two
+    # runs on this exact rule (Rails required, resume shows zero Rails
+    # evidence) purely from non-determinism in how required_skills_pct got
+    # blended with other sub-scores. Hard-cap regardless of what the LLM
+    # reported when the title names a stack the resume never mentions.
+    title_stack_terms = {
+        "rails": ("rails", "ruby on rails", "ruby"),
+        "django": ("django",),
+        "laravel": ("laravel", "php"),
+        ".net": (".net", "c#", "asp.net"),
+        "golang": ("golang", " go "),
+        "rust": ("rust",),
+        "java": (" java ", "spring boot", "spring framework"),
+        "elixir": ("elixir", "phoenix"),
+        "scala": ("scala",),
+    }
+    for title_kw, resume_aliases in title_stack_terms.items():
+        if title_kw in job_lower and not any(alias in f" {resume_lower} " for alias in resume_aliases):
+            eval_result["required_skills_pct"] = min(eval_result.get("required_skills_pct", 0), 20)
+            eval_result["domain_fit_pct"] = min(eval_result.get("domain_fit_pct", 0), 30)
+            readable = title_kw.strip(".").title() if title_kw != ".net" else ".NET"
+            if readable not in cleaned_missing:
+                cleaned_missing.append(readable)
+            eval_result["missing_skills"] = cleaned_missing
+            break
+
     role_is_solutions = bool(re.search(
         r"\b(solutions architect|pre-sales|presales|field engineer)\b", job_lower
     ))
