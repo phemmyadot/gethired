@@ -35,7 +35,7 @@ def extract_profile(resume_content: str, retries: int = 3) -> dict | None:
     for attempt in range(1, retries + 1):
         try:
             raw = generate_text(PROFILE_PROMPT.format(resume_content=resume_content[:4000]))
-            profile = json.loads(raw)
+            profile = raw if isinstance(raw, dict) else json.loads(raw)
             search_keywords = profile.get("search_keywords")
             if not search_keywords:
                 raise ValueError("no search_keywords in response")

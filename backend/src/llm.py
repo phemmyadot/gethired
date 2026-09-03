@@ -39,6 +39,14 @@ def _local_llm_scoring_model() -> str:
     return os.getenv("LOCAL_LLM_SCORING_MODEL", "qwen2.5-7b-instruct")
 
 
+def _local_llm_prose_model() -> str:
+    # Cover letters / hook extraction are free-form prose, not structured
+    # scoring — default to Qwen rather than whatever LOCAL_LLM_MODEL is
+    # currently set to (e.g. a DeepSeek reasoning model tuned for scoring),
+    # since the JSON-prefill reasoning-model handling doesn't apply here.
+    return os.getenv("LOCAL_LLM_PROSE_MODEL", "qwen2.5-7b-instruct")
+
+
 def _local_llm_timeout() -> float:
     return float(os.getenv("LOCAL_LLM_TIMEOUT", "120"))
 
@@ -147,6 +155,42 @@ def call_local_llm(prompt: str, system_prompt: str | None = None, model: str | N
     return parse_prefilled_completion(raw_content)
 
 
+def call_local_llm_prose(
+    prompt: str,
+    system_prompt: str | None = None,
+    model: str | None = None,
+    max_tokens: int = 800,
+) -> str:
+    """
+    Free-form text generation (cover letters, hook extraction prose) — unlike
+    call_local_llm(), this does NOT inject the scoring SYSTEM_PROMPT, does NOT
+    apply the DeepSeek `</think>\\n{` JSON-prefill hack (which would force the
+    model to open its reply with `{`, breaking non-JSON output), and returns
+    the raw string instead of parsing it as JSON.
+    """
+    url = f"{_local_llm_base_url()}/chat/completions"
+    selected_model = model or _local_llm_model()
+    messages: list[dict[str, str]] = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": prompt})
+
+    payload = {
+        "model": selected_model,
+        "messages": messages,
+        "temperature": 0.4,
+        "max_tokens": max_tokens,
+        "cache_prompt": False,
+    }
+
+    with _LOCAL_LLM_LOCK:
+        resp = httpx.post(url, json=payload, timeout=_local_llm_timeout())
+    resp.raise_for_status()
+    data = resp.json()
+    content = data["choices"][0]["message"]["content"] or ""
+    return re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+
+
 def call_anthropic(prompt: str, system_prompt: str | None = None) -> str:
     from anthropic import Anthropic
 
@@ -170,6 +214,7 @@ def call_anthropic(prompt: str, system_prompt: str | None = None) -> str:
 
 def generate_text(prompt: str, system_prompt: str | None = None, model: str | None = None) -> str:
     provider = os.getenv("LLM_PROVIDER", "local").lower()
+    provider_error = None
     prompt_chars = len(prompt) + len(system_prompt or "")
     start = time.monotonic()
 
@@ -193,6 +238,7 @@ def generate_text(prompt: str, system_prompt: str | None = None, model: str | No
             _log_timing(f"local:{model or _local_llm_model()}")
             return result
         except Exception as exc:
+            provider_error = exc
             logger.warning("Local LLM provider failed: %s", exc)
 
     if os.getenv("ANTHROPIC_API_KEY"):
@@ -203,6 +249,65 @@ def generate_text(prompt: str, system_prompt: str | None = None, model: str | No
         except Exception as exc:
             logger.warning("Anthropic fallback failed: %s", exc)
 
+    if provider_error is not None:
+        raise RuntimeError(f"Local LLM request failed: {provider_error}") from provider_error
+    raise RuntimeError(
+        "No LLM provider available. Set LLM_PROVIDER=local with LOCAL_LLM_BASE_URL and LOCAL_LLM_MODEL or configure ANTHROPIC_API_KEY."
+    )
+
+
+def generate_prose_text(
+    prompt: str,
+    system_prompt: str | None = None,
+    model: str | None = None,
+    max_tokens: int = 800,
+) -> str:
+    """
+    Like generate_text(), but for free-form prose (cover letters, hook
+    extraction) rather than structured scoring JSON — uses call_local_llm_prose()
+    so the scoring SYSTEM_PROMPT and JSON-prefill hack never leak into prose
+    generation, and defaults to LOCAL_LLM_PROSE_MODEL (Qwen) instead of
+    whatever LOCAL_LLM_MODEL is set to for scoring.
+    """
+    provider = os.getenv("LLM_PROVIDER", "local").lower()
+    provider_error = None
+    prompt_chars = len(prompt) + len(system_prompt or "")
+    start = time.monotonic()
+    selected_model = model or _local_llm_prose_model()
+
+    def _log_timing(used_provider: str):
+        elapsed = time.monotonic() - start
+        logger.info(
+            f"LLM call [{used_provider}]: {elapsed:.2f}s, prompt={prompt_chars} chars"
+        )
+
+    if provider == "anthropic":
+        try:
+            result = call_anthropic(prompt, system_prompt)
+            _log_timing("anthropic")
+            return result
+        except Exception as exc:
+            logger.warning("Anthropic provider failed: %s", exc)
+
+    if provider in {"local", "openai_compatible"}:
+        try:
+            result = call_local_llm_prose(prompt, system_prompt, selected_model, max_tokens)
+            _log_timing(f"local:{selected_model}")
+            return result
+        except Exception as exc:
+            provider_error = exc
+            logger.warning("Local LLM provider failed: %s", exc)
+
+    if os.getenv("ANTHROPIC_API_KEY"):
+        try:
+            result = call_anthropic(prompt, system_prompt)
+            _log_timing("anthropic_fallback")
+            return result
+        except Exception as exc:
+            logger.warning("Anthropic fallback failed: %s", exc)
+
+    if provider_error is not None:
+        raise RuntimeError(f"Local LLM request failed: {provider_error}") from provider_error
     raise RuntimeError(
         "No LLM provider available. Set LLM_PROVIDER=local with LOCAL_LLM_BASE_URL and LOCAL_LLM_MODEL or configure ANTHROPIC_API_KEY."
     )

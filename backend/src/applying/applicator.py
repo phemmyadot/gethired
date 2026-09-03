@@ -6,10 +6,11 @@ then attempts submission via Greenhouse/Lever APIs or Playwright form fill.
 import json
 import logging
 import os
+import re
 from sqlalchemy.orm import Session
 
 from ..db.models import AppliedJob, Job, Resume
-from ..llm import generate_text
+from ..llm import generate_prose_text
 
 logger = logging.getLogger(__name__)
 
@@ -43,8 +44,9 @@ def _extract_job_hooks(job: Job) -> dict:
         prompt = HOOK_EXTRACTION_PROMPT.format(
             title=job.title, company=job.company, job_excerpt=job.description[:2000],
         )
-        raw = generate_text(prompt)
-        hooks = json.loads(raw)
+        raw = generate_prose_text(prompt)
+        match = re.search(r"\{.*\}", raw, flags=re.DOTALL)
+        hooks = json.loads(match.group(0) if match else raw)
         return {
             "opening_hook": hooks.get("opening_hook") or default["opening_hook"],
             "first_90_days_focus": hooks.get("first_90_days_focus") or default["first_90_days_focus"],
@@ -97,7 +99,7 @@ def generate_cover_letter(
         first_90_days_focus=hooks["first_90_days_focus"] or "(none found — pick the most relevant listed responsibility)",
     )
     try:
-        return generate_text(prompt)
+        return generate_prose_text(prompt)
     except Exception as e:
         logger.error(f"Cover letter generation failed: {e}")
         return ""

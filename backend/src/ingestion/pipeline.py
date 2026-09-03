@@ -172,7 +172,16 @@ def extract_ambiguous_job_metadata(job: dict) -> dict:
         location=job.get("location", ""),
         description=job.get("description", "")[:1800],
     )
-    result = parse_llm_json_response(generate_text(prompt))
+    try:
+        result = parse_llm_json_response(generate_text(prompt))
+    except Exception as exc:
+        logger.warning("Ambiguous job metadata extraction failed: %s", exc)
+        return {
+            "work_mode": "unknown",
+            "is_us_remote_eligible": False,
+            "is_engineering_role": False,
+            "confidence": "low",
+        }
     return {
         "work_mode": result.get("work_mode", "unknown"),
         "is_us_remote_eligible": bool(result.get("is_us_remote_eligible", False)),
