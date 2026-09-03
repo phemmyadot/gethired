@@ -136,6 +136,32 @@ class JobWorkModeScanner:
 
 WORK_MODE_SCANNER = JobWorkModeScanner()
 
+
+class JobTitleRoleScanner:
+    """Classify high-confidence engineering-role signals from a job title alone."""
+
+    NON_ENGINEERING_TERMS = {
+        "advocate", "advocacy", "community", "recruiting", "recruiter",
+        "sales", "marketing", "support", "customer success", "relations",
+    }
+    ENGINEERING_TERMS = {
+        "engineer", "engineering", "developer", "programmer", "architect",
+        "devops", "backend", "frontend", "full-stack", "fullstack", "platform",
+        "infrastructure", "systems", "cloud", "sre", "reliability", "data",
+        "mlops", "machine learning", "ai", "llm", "mobile", "software",
+    }
+
+    def scan(self, title: str) -> dict:
+        title_lower = (title or "").lower()
+        if any(term in title_lower for term in self.NON_ENGINEERING_TERMS):
+            return {"is_engineering_role": False, "confidence": "high"}
+        if any(re.search(rf"\b{re.escape(term)}\b", title_lower) for term in self.ENGINEERING_TERMS):
+            return {"is_engineering_role": True, "confidence": "high"}
+        return {"is_engineering_role": False, "confidence": "low"}
+
+
+TITLE_ROLE_SCANNER = JobTitleRoleScanner()
+
 JOB_METADATA_PROMPT = """You are a precise job metadata extraction engine.
 Analyze only this job posting and return valid JSON. Do not use markdown.
 
@@ -485,23 +511,31 @@ def run_ingestion(db: Session, prefs: dict = None, sources: list[str] = None, lo
     logger.info(f"Resume-title filter: {len(title_matched)}/{len(filtered)} passed")
 
     # Classify before persistence so only fully remote jobs enter the database.
-    scanner = WORK_MODE_SCANNER
     remote_only = []
     for job in title_matched:
-        scan = scanner.scan(
+        work_scan = WORK_MODE_SCANNER.scan(
             " ".join(str(job.get(field) or "") for field in ("title", "location", "description"))
         )
-        if scan["work_mode"] in ("invalid", "hybrid_or_onsite", "restricted_remote"):
+        if work_scan["work_mode"] in ("invalid", "hybrid_or_onsite", "restricted_remote"):
             continue
-        if scan["confidence"] == "high":
-            job["work_mode"] = scan["work_mode"]
+
+        role_scan = TITLE_ROLE_SCANNER.scan(job.get("title", ""))
+
+        if work_scan["confidence"] == "high" and role_scan["confidence"] == "high":
+            job["work_mode"] = work_scan["work_mode"]
             job["is_us_remote_eligible"] = True
-            job["is_engineering_role"] = True
+            job["is_engineering_role"] = role_scan["is_engineering_role"]
         else:
             metadata = extract_ambiguous_job_metadata(job)
-            job["work_mode"] = metadata["work_mode"]
+            # Trust the regex scanner over the LLM for whichever field it was
+            # already confident about — no reason to let the LLM's answer for
+            # a decided field override a cheaper, deterministic signal.
+            job["work_mode"] = work_scan["work_mode"] if work_scan["confidence"] == "high" else metadata["work_mode"]
             job["is_us_remote_eligible"] = metadata["is_us_remote_eligible"]
-            job["is_engineering_role"] = metadata["is_engineering_role"]
+            job["is_engineering_role"] = (
+                role_scan["is_engineering_role"] if role_scan["confidence"] == "high"
+                else metadata["is_engineering_role"]
+            )
         if (
             job["work_mode"] == "remote"
             and job["is_us_remote_eligible"]
