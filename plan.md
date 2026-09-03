@@ -1,108 +1,182 @@
-# Plan: Dynamic company discovery for Greenhouse / Lever / Ashby
+# Plan: Learned title-keyword store for `JobTitleRoleScanner`
 
 ## Problem
-`GREENHOUSE_COMPANY_TOKENS` / `LEVER_COMPANY_TOKENS` are static, hand-maintained
-env-var lists ([sources.py:278-348](backend/src/ingestion/sources.py#L278-L348)).
-There's no free public directory mapping "companies hiring for X" to their ATS
-board token, so the list never grows on its own and misses companies that would
-otherwise be relevant to the current resume profile.
 
-## Core idea
-Adzuna / Remotive / RemoteOK / Jobicy / Arbeitnow already return real `company`
-names on every ingestion run, scoped by the resume's search keywords
-([pipeline.py](backend/src/ingestion/pipeline.py) `run_ingestion`). Treat those
-company names as free candidate signal: probe whether each one also has a
-Greenhouse/Lever/Ashby board, cache confirmed tokens, and feed them into the
-existing `fetch_greenhouse_all` / `fetch_lever_all` (+ new `fetch_ashby_all`)
-company lists — no LLM cost, just a handful of cheap HTTP HEAD/GET probes per
-new company name.
+`JobTitleRoleScanner` ([pipeline.py](backend/src/ingestion/pipeline.py)) classifies
+`is_engineering_role` from two hardcoded sets:
 
-## Architecture
-
-### 1. New table: `discovered_ats_companies`
-```
-id            UUID PK
-company_name  TEXT          -- raw name as seen from aggregator, e.g. "Notion Labs Inc."
-source        TEXT          -- "greenhouse" | "lever" | "ashby"
-board_token   TEXT NULL     -- confirmed slug if found, NULL if ruled out
-status        TEXT          -- "confirmed" | "not_found" | "pending"
-checked_at    TIMESTAMP
-UNIQUE(company_name, source)
-```
-Alembic migration `0005_discovered_ats_companies.py`.
-
-Storing both confirmed AND ruled-out (`not_found`) rows is required — otherwise
-the same non-matching company gets re-probed (and re-404s) on every run
-forever.
-
-### 2. Slug candidate generation
-New helper in `sources.py`:
 ```python
-def _slug_candidates(company_name: str) -> list[str]:
-    """e.g. 'Notion Labs, Inc.' -> ['notion-labs-inc', 'notion-labs', 'notion']"""
+NON_ENGINEERING_TERMS = {"advocate", "advocacy", "community", "recruiting", ...}
+ENGINEERING_TERMS = {"engineer", "engineering", "developer", ...}
 ```
-Strip common suffixes (Inc, LLC, Corp, Ltd, Co), lowercase, hyphenate, and also
-try just the first word — covers the common cases (`Stripe` -> `stripe`,
-`Notion Labs Inc.` -> `notion`) without over-engineering fuzzy matching.
 
-### 3. Probe functions (one per ATS)
+When neither set matches a title, confidence is `"low"` and the job falls
+through to `extract_ambiguous_job_metadata()` — an LLM call. Every such call
+that resolves `is_engineering_role` cleanly (LLM says yes/no with reasonable
+confidence) is a term the regex *could* have caught next time, but today that
+signal is discarded once the job is classified — the term set never grows.
+
+## Goal
+
+Every time the LLM resolves an engineering-role ambiguity, persist the
+title term(s) that made the title ambiguous, tagged with the LLM's verdict.
+Over time, promote frequently-seen, consistently-resolved terms into the
+regex scanner's working set (loaded from DB, not just the hardcoded
+literals), so fewer titles need the LLM on subsequent runs — the same
+"cache what's expensive, consult the cache first" pattern already used by
+`DiscoveredAtsCompany` for ATS board tokens.
+
+## Data model
+
+New table, same shape/spirit as `DiscoveredAtsCompany`:
+
 ```python
-def probe_greenhouse(slug: str) -> bool   # GET boards-api.greenhouse.io/v1/boards/{slug}/jobs, cheap, no LLM
-def probe_lever(slug: str) -> bool        # GET api.lever.co/v0/postings/{slug}?mode=json
-def probe_ashby(slug: str) -> bool        # GET api.ashbyhq.com/posting-api/job-board/{slug}
-```
-Each: short timeout (5s), treat any 2xx with a non-empty postings list as
-confirmed, 404/empty as not_found. Try each slug candidate in order, stop at
-first hit.
+class TitleKeywordSignal(Base):
+    __tablename__ = "title_keyword_signals"
 
-### 4. Discovery step in the ingestion pipeline
-In `run_ingestion` ([pipeline.py](backend/src/ingestion/pipeline.py)), after
-the aggregator fetch step and before pre-filtering:
+    id            = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    term          = Column(String(100), nullable=False)   # normalized lowercase token/phrase
+    verdict       = Column(String(20), nullable=False)     # "engineering" | "non_engineering"
+    source        = Column(String(20), nullable=False, default="llm")  # "llm" | "manual"
+    seen_count    = Column(Integer, nullable=False, default=1)   # times this term produced this verdict
+    conflict_count = Column(Integer, nullable=False, default=0)  # times LLM gave the OPPOSITE verdict for this term
+    first_seen_at = Column(DateTime, default=datetime.utcnow)
+    last_seen_at  = Column(DateTime, default=datetime.utcnow)
+    promoted      = Column(Boolean, nullable=False, default=False)  # true once folded into the active regex set
+
+    __table_args__ = (
+        UniqueConstraint("term", "verdict", name="uq_title_keyword_term_verdict"),
+    )
+```
+
+Why `term` + `verdict` as separate rows rather than one row per `term` with a
+running score: a term can legitimately get conflicting verdicts from
+different postings (e.g. "platform" appears in both "Platform Engineer" and
+"Platform Support Specialist" — context-dependent). Keeping both rows lets
+promotion logic see the conflict rate and refuse to promote ambiguous terms,
+rather than averaging it away.
+
+## Extraction: which term to attribute the LLM's verdict to
+
+The LLM resolves a *title*, not a single term. To turn that into a
+term-level signal, extract candidate terms from the ambiguous title the same
+way `_matches_resume_title`/`JobTitleRoleScanner` already tokenize — split on
+non-alphanumeric, drop stopwords/seniority words (`senior`, `sr`, `staff`,
+`lead`, `of`, `the`, `and`, ...) — and record **every remaining term** against
+the LLM's `is_engineering_role` verdict for that job. A multi-word title like
+"Member of Technical Staff" yields terms `{member, technical, staff}` (after
+stopword removal: `{member, technical}` — "staff" is already a seniority
+stopword elsewhere in this codebase, worth reusing that exact list for
+consistency). This is deliberately noisy at the term level; the promotion
+step (below) is what filters noise out via repetition + consistency, not the
+extraction step.
+
+## Write path
+
+In the classify loop (`run_ingestion`, pipeline.py), immediately after an
+`extract_ambiguous_job_metadata()` call whose `is_engineering_role` came from
+the LLM (i.e. `role_scan["confidence"] != "high"`):
+
+1. Tokenize `job["title"]` into candidate terms (as above).
+2. For each term, upsert `TitleKeywordSignal(term, verdict)`:
+   - increment `seen_count` if the row exists,
+   - increment `conflict_count` on the *opposite*-verdict row for the same
+     `term` if it exists (so both rows' conflict counters track disagreement
+     between them),
+   - else insert a new row.
+3. Batch this with the existing per-job `save_job` commit pattern — don't add
+   a new commit point; append to the same transaction that's already closed
+   after each classify iteration (see the `db.commit()` fixes already in
+   `save_job`/the classify loop — this write must follow that same
+   "commit before the next slow LLM call" discipline, not reopen the leak).
+
+This write is small and synchronous-safe: it's a plain upsert, not a network
+call, so it doesn't reintroduce the idle-in-transaction risk as long as it's
+committed in the same breath as the job's own save.
+
+## Promotion: growing the regex set
+
+Promotion is a **separate, explicit step** — not automatic on every write —
+so a single mislabeled LLM response can't immediately corrupt the live
+scanner. Two options, pick one at implementation time:
+
+- **A. Startup-time load**: `JobTitleRoleScanner.__init__` (or a module-level
+  loader called once at process start / ingestion-run start) queries
+  `TitleKeywordSignal` for rows meeting a promotion threshold — e.g.
+  `seen_count >= 5 AND conflict_count == 0` (or `conflict_count / seen_count`
+  below some small ratio, e.g. 10%, if occasional noise should be tolerated)
+  — and merges promoted terms into `ENGINEERING_TERMS`/`NON_ENGINEERING_TERMS`
+  in memory for that run. Marks `promoted = True` on read so a dashboard/log
+  can show what's live. Simple, no separate job, but the set only grows
+  between process restarts (fine, since this API already restarts fairly
+  often in practice per this session's history).
+
+- **B. Explicit promotion pass**: a small maintenance function
+  (`promote_title_keywords(db)`), run on a schedule (alongside the existing
+  scheduler in [scheduler.py](backend/src/scheduler.py)) or manually via a
+  script/endpoint, that reads candidates past the threshold, writes them
+  into a small `PromotedTitleKeyword` cache table (or just flips `promoted`
+  on `TitleKeywordSignal` and the scanner queries `WHERE promoted = True`
+  directly instead of the hardcoded set at all). Slightly more moving parts,
+  but decouples "when do we trust a new term" from "when does the process
+  happen to restart."
+
+Recommendation: start with **A** (startup-time load, threshold check inline)
+— it's the smaller change, reuses the existing hardcoded sets as the
+always-on floor (DB-promoted terms are additive, never replace the floor),
+and matches how `_confirmed_tokens()` already works for ATS company tokens
+(read once per run, not continuously re-evaluated).
+
+## Scanner change
+
 ```python
-new_company_names = {j["company"] for j in all_raw if j["source"] in AGGREGATOR_SOURCES}
-_discover_ats_companies(db, new_company_names, limit=20)  # rate-capped per run
+class JobTitleRoleScanner:
+    def __init__(self, extra_engineering: set[str] = None, extra_non_engineering: set[str] = None):
+        self.ENGINEERING_TERMS = self.ENGINEERING_TERMS | (extra_engineering or set())
+        self.NON_ENGINEERING_TERMS = self.NON_ENGINEERING_TERMS | (extra_non_engineering or set())
+    ...
+
+def _load_promoted_terms(db) -> tuple[set[str], set[str]]:
+    rows = db.query(TitleKeywordSignal).filter(
+        TitleKeywordSignal.seen_count >= PROMOTION_MIN_SEEN,
+        TitleKeywordSignal.conflict_count == 0,
+    ).all()
+    eng = {r.term for r in rows if r.verdict == "engineering"}
+    non_eng = {r.term for r in rows if r.verdict == "non_engineering"}
+    return eng, non_eng
+
+# in run_ingestion, once per run (not per job):
+extra_eng, extra_non_eng = _load_promoted_terms(db)
+db.commit()  # close the read's transaction before the classify loop, per the leak-prevention pattern
+scanner = JobTitleRoleScanner(extra_eng, extra_non_eng)
 ```
-`_discover_ats_companies`:
-- Skip any `(company_name, source)` pair already in `discovered_ats_companies`.
-- For the rest (capped at `limit` per run per source, e.g. 20), run the slug
-  probe for each of greenhouse/lever/ashby.
-- Write a `confirmed`/`not_found` row for every attempt (so it's never
-  reprobed).
-- This runs synchronously inline in ingestion for simplicity — probes are
-  cheap (a few HTTP calls, no LLM), capped count keeps it bounded.
 
-### 5. Wire confirmed tokens into fetch calls
-```python
-def _confirmed_tokens(db, source: str) -> list[str]:
-    return [r.board_token for r in db.query(DiscoveredAtsCompany)
-            .filter_by(source=source, status="confirmed")]
-```
-`fetch_greenhouse_all` / `fetch_lever_all` company list becomes:
-`env-configured tokens + discovered confirmed tokens` (dedup, union).
-New `fetch_ashby_all` follows the exact same pattern as the other two
-(`fetch_ashby_company(token)` + `fetch_ashby_all(companies=None)`), gated by a
-new `ASHBY_ENABLED` flag mirroring `GREENHOUSE_ENABLED`/`LEVER_ENABLED`.
+`TITLE_ROLE_SCANNER` stops being a module-level singleton constructed once at
+import time and becomes constructed per-run instead (cheap — it's just two
+set unions), so each run picks up whatever's been promoted since the last one.
 
-### 6. Still respect existing feature flags
-Discovery runs regardless of `GREENHOUSE_ENABLED`/`LEVER_ENABLED`/`ASHBY_ENABLED`
-(cheap, no reason to gate it) — but **fetching** confirmed companies' full job
-lists still only happens if that source's flag is on, same as today.
+## Non-goals / deferred
 
-## Sequencing / rollout
-1. Migration + `DiscoveredAtsCompany` model.
-2. Slug generation + 3 probe functions + unit-testable in isolation.
-3. Wire `_discover_ats_companies` into `run_ingestion`, capped at ~20/run.
-4. Wire confirmed tokens into the 3 `fetch_*_all` company-list resolution.
-5. Add `fetch_ashby_all` (new source, same shape as Greenhouse/Lever) +
-   `ASHBY_ENABLED` flag + add `"ashby"` to `_default_sources()`.
-6. Manual test: run ingestion once, confirm `discovered_ats_companies` fills
-   with a mix of confirmed/not_found rows, confirm no perf regression on
-   ingestion time from the added probes.
+- **No automatic demotion.** If a promoted term starts conflicting later
+  (new postings disagree with the old verdict), that shows up as
+  `conflict_count` climbing on the *other*-verdict row, but nothing
+  automatically un-promotes the original. Manual review only, for now —
+  automatic demotion risks flapping.
+- **No UI.** This plan is data-model + load-path only; a future pass could
+  expose `TitleKeywordSignal` rows in an admin view for manual promote/reject,
+  similar to how `DiscoveredAtsCompany` has no UI today either.
+- **No cross-scanner reuse.** `JobWorkModeScanner`'s regexes are structural
+  (phrase patterns like `"remote in the us"`), not single-term — this
+  learning loop is specific to `JobTitleRoleScanner`'s term-membership
+  design and doesn't generalize to work_mode without a different extraction
+  strategy (phrase n-grams, not tokens).
 
-## Open questions to confirm before implementing
-- Probe cap per run (suggested: 20 per source, ~60 total) — fine, or lower to
-  be gentler on ingestion latency?
-- Should `not_found` rows ever be retried (e.g. after 90 days, in case a
-  company adds a board later)? Suggested: no retry for v1, revisit if needed.
-- Ashby: same `ASHBY_ENABLED`-gated, opt-in-by-default-off pattern as
-  Greenhouse/Lever, or enabled by default since it's read-only discovery?
+## Files touched (when implemented)
+
+- `backend/src/db/models.py` — add `TitleKeywordSignal`.
+- `backend/src/ingestion/pipeline.py` — tokenize+upsert on LLM role
+  resolution; `_load_promoted_terms()`; `JobTitleRoleScanner.__init__` takes
+  extra sets; `run_ingestion` constructs the scanner per-run instead of using
+  a module singleton.
+- Manual one-time `ALTER TABLE`/`CREATE TABLE` against the dev DB, same as
+  every other schema change this session — no migration tooling in this repo.

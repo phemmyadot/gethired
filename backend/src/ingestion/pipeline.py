@@ -130,7 +130,12 @@ class JobWorkModeScanner:
         if self.RESTRICTED_REMOTE.search(text):
             return {"work_mode": "restricted_remote", "confidence": "high"}
         if self.GENERIC_REMOTE.search(text):
-            return {"work_mode": "remote", "confidence": "medium"}
+            # Not explicitly US-scoped, but by the time this scanner runs the
+            # job has already survived pre_filter's non-US-location blacklist
+            # (_is_non_us_location), so plain "remote" with no hybrid/onsite/
+            # restricted signal is trusted rather than sent to the LLM just to
+            # re-confirm what the location filter already established.
+            return {"work_mode": "remote", "confidence": "high"}
         return {"work_mode": "unknown", "confidence": "low"}
 
 
@@ -229,6 +234,10 @@ def discover_ats_companies(db: Session, company_names: set[str]) -> None:
             r[0] for r in db.query(DiscoveredAtsCompany.company_name)
             .filter_by(source=source).all()
         }
+        # Close the transaction this read opened before the (HTTP-bound) probe
+        # loop below, so the session isn't left idle-in-transaction for the
+        # duration of every candidate's probe call.
+        db.commit()
         candidates = [c for c in company_names if c and c not in already_checked][:DISCOVERY_PROBE_CAP]
         if not candidates:
             continue
@@ -358,6 +367,10 @@ def save_job(job_dict: dict, db: Session) -> tuple[Job | None, bool]:
     ).first()
 
     if existing:
+        # Read-only lookup, but SQLAlchemy still opened a transaction for it —
+        # close it out rather than leaving the session idle-in-transaction for
+        # however long the caller's next DB-free work (e.g. an LLM call) takes.
+        db.commit()
         return existing, False
 
     job_dict = {**job_dict, "posted_at": _parse_posted_at(job_dict.get("posted_at"))}
@@ -366,6 +379,11 @@ def save_job(job_dict: dict, db: Session) -> tuple[Job | None, bool]:
         db.add(job)
         db.commit()
         db.refresh(job)
+        # db.refresh() issues its own SELECT, which (like the dedup lookup
+        # above) opens a fresh transaction that the prior commit() doesn't
+        # cover. Close it here too, so the session isn't left idle-in-transaction
+        # across the caller's next DB-free work (e.g. an LLM classify call).
+        db.commit()
         return job, True
     except IntegrityError:
         db.rollback()
@@ -373,6 +391,7 @@ def save_job(job_dict: dict, db: Session) -> tuple[Job | None, bool]:
             source=job_dict["source"],
             external_id=job_dict["external_id"]
         ).first()
+        db.commit()
         return existing, False
 
 
@@ -424,6 +443,14 @@ def run_ingestion(db: Session, prefs: dict = None, sources: list[str] = None, lo
     log_id = log.id if log else None
     should_stop = (lambda: _is_stopping(log_id)) if log_id else None
 
+    def _report_pooled(count: int):
+        """Persist raw-fetched count so far, so the UI can poll live progress
+        during the fetch stage instead of only seeing counts once it's done."""
+        if log is None:
+            return
+        log.jobs_found = count
+        db.commit()
+
     # 1. Fetch — search each keyword variant (e.g. with and without "senior")
     for keywords in keyword_variants:
         if should_stop and should_stop():
@@ -432,18 +459,23 @@ def run_ingestion(db: Session, prefs: dict = None, sources: list[str] = None, lo
 
         if "adzuna" in sources:
             all_raw.extend(fetch_adzuna(keywords=keywords))
+            _report_pooled(len(all_raw))
 
         if "remotive" in sources:
             all_raw.extend(fetch_remotive(search=keywords))
+            _report_pooled(len(all_raw))
 
         if "remoteok" in sources:
             all_raw.extend(fetch_remoteok(search=keywords))
+            _report_pooled(len(all_raw))
 
         if "jobicy" in sources:
             all_raw.extend(fetch_jobicy(search=keywords))
+            _report_pooled(len(all_raw))
 
         if "arbeitnow" in sources:
             all_raw.extend(fetch_arbeitnow(search=keywords))
+            _report_pooled(len(all_raw))
 
     stopped = bool(should_stop and should_stop())
 
@@ -457,14 +489,24 @@ def run_ingestion(db: Session, prefs: dict = None, sources: list[str] = None, lo
 
         if "greenhouse" in sources and not (should_stop and should_stop()):
             companies = list(set(GREENHOUSE_COMPANIES) | set(_confirmed_tokens(db, "greenhouse")))
+            # _confirmed_tokens's read opened a transaction; close it before the
+            # (possibly long, HTTP-bound) fetch call below so the session isn't
+            # left idle-in-transaction for the duration of that fetch.
+            db.commit()
             all_raw.extend(fetch_greenhouse_all(companies=companies, should_stop=should_stop))
+            _report_pooled(len(all_raw))
 
         if "lever" in sources and not (should_stop and should_stop()):
             companies = list(set(LEVER_COMPANIES) | set(_confirmed_tokens(db, "lever")))
+            db.commit()
             all_raw.extend(fetch_lever_all(companies=companies, should_stop=should_stop))
+            _report_pooled(len(all_raw))
 
         if "ashby" in sources and not (should_stop and should_stop()):
-            all_raw.extend(fetch_ashby_all(companies=_confirmed_tokens(db, "ashby") or None, should_stop=should_stop))
+            ashby_companies = _confirmed_tokens(db, "ashby") or None
+            db.commit()
+            all_raw.extend(fetch_ashby_all(companies=ashby_companies, should_stop=should_stop))
+            _report_pooled(len(all_raw))
 
     stopped = stopped or bool(should_stop and should_stop())
     logger.info(f"Ingestion: {len(all_raw)} total raw jobs from {len(sources)} sources" + (" (stopped early)" if stopped else ""))
@@ -502,6 +544,11 @@ def run_ingestion(db: Session, prefs: dict = None, sources: list[str] = None, lo
     # not just ones this code path reassigned).
     if log is not None:
         db.refresh(log)
+        # refresh() opened a transaction; the classify loop below can run for
+        # a long time (LLM fallback calls, one job at a time) before it next
+        # touches the DB, so close this out now instead of leaving the session
+        # idle-in-transaction for that whole stretch.
+        db.commit()
 
     # 2. Pre-filter
     filtered = [j for j in all_raw if pre_filter(j, prefs)]
@@ -510,13 +557,27 @@ def run_ingestion(db: Session, prefs: dict = None, sources: list[str] = None, lo
     title_matched = [j for j in filtered if _matches_resume_title(j, prefs)]
     logger.info(f"Resume-title filter: {len(title_matched)}/{len(filtered)} passed")
 
-    # Classify before persistence so only fully remote jobs enter the database.
-    remote_only = []
-    for job in title_matched:
+    # Classify and save in the same pass — each job is persisted the moment it
+    # clears classification, instead of collecting a remote_only list first and
+    # saving afterward. Fetching and classifying a large batch can take minutes
+    # (LLM fallback calls run one at a time), so batching the save to the end
+    # meant a crash/restart mid-classify lost every already-decided job, and
+    # jobs_new sat at 0 for the whole classify duration even though jobs were
+    # already being accepted/rejected one by one under the hood.
+    new_jobs: list[Job] = []
+    duped = 0
+    start = time.time()
+
+    for i, job in enumerate(title_matched):
         work_scan = WORK_MODE_SCANNER.scan(
             " ".join(str(job.get(field) or "") for field in ("title", "location", "description"))
         )
-        if work_scan["work_mode"] in ("invalid", "hybrid_or_onsite", "restricted_remote"):
+        # "unknown" means no remote/hybrid/onsite/restricted language appeared
+        # anywhere in title, location, or a description already confirmed to be
+        # at least 100 chars (pre_filter) — absence of any remote signal in a
+        # substantial posting is itself a strong signal this is an onsite role,
+        # so reject outright rather than spending an LLM call to double-check.
+        if work_scan["work_mode"] in ("invalid", "hybrid_or_onsite", "restricted_remote", "unknown"):
             continue
 
         role_scan = TITLE_ROLE_SCANNER.scan(job.get("title", ""))
@@ -531,34 +592,33 @@ def run_ingestion(db: Session, prefs: dict = None, sources: list[str] = None, lo
             # already confident about — no reason to let the LLM's answer for
             # a decided field override a cheaper, deterministic signal.
             job["work_mode"] = work_scan["work_mode"] if work_scan["confidence"] == "high" else metadata["work_mode"]
-            job["is_us_remote_eligible"] = metadata["is_us_remote_eligible"]
+            job["is_us_remote_eligible"] = (
+                True if work_scan["confidence"] == "high" else metadata["is_us_remote_eligible"]
+            )
             job["is_engineering_role"] = (
                 role_scan["is_engineering_role"] if role_scan["confidence"] == "high"
                 else metadata["is_engineering_role"]
             )
-        if (
+        if not (
             job["work_mode"] == "remote"
             and job["is_us_remote_eligible"]
             and job["is_engineering_role"]
         ):
-            remote_only.append(job)
-    logger.info(f"Remote-only filter: {len(remote_only)}/{len(filtered)} passed")
+            continue
 
-    # 3. Save (dedup via DB unique constraint)
-    new_jobs: list[Job] = []
-    duped = 0
-    start = time.time()
-
-    for job_dict in remote_only:
         persisted_job = {
-            key: value for key, value in job_dict.items()
+            key: value for key, value in job.items()
             if key not in {"is_us_remote_eligible", "is_engineering_role"}
         }
-        job, is_new = save_job(persisted_job, db)
+        saved_job, is_new = save_job(persisted_job, db)
         if is_new:
-            new_jobs.append(job)
+            new_jobs.append(saved_job)
         else:
             duped += 1
+        if log is not None and (len(new_jobs) + duped) % 10 == 0:
+            log.jobs_new = len(new_jobs)
+            log.jobs_duped = duped
+            db.commit()
 
     duration = round(time.time() - start, 2)
     logger.info(f"Saved {len(new_jobs)} new jobs, {duped} duplicates skipped in {duration}s")
